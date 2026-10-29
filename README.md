@@ -27,11 +27,11 @@ Personal use, sideloaded. Not for the Play Store (it uses device admin and an ac
 - Meds with times and days, reminders that repeat every 10 minutes (up to 3 hours) until you tap Taken, Snooze or Skip.
 - Pill count goes down as you log, with a warning a set number of days before you run out.
 - History: last 30 days, mornings-in-a-row and days-all-meds-taken streaks, and CSV export.
-- Everything stays on the phone. No internet permission, no backups.
+- Everything stays on the phone, with no account and no backups. Upright never uploads your data. (The APK lists internet access because Google's barcode scanner library adds it.)
 
 ## Setup on the phone
 
-1. Install `Upright-0.1.0.apk`.
+1. Download the APK from [Releases](https://github.com/PresWiFi/upright/releases/latest) on the phone and install it (allow installs from your browser when asked).
 2. Open Settings in the app and work through the checklist. Each "Fix" button opens the right system page.
    - On OnePlus also go to app info → Battery → **Unrestricted**, and allow auto-launch if it's offered.
 3. Add tags (Settings → Tags): tap each NFC card, or scan a barcode. Name them by where they'll live.
