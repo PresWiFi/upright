@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Upright</string>
+    <string name="accessibility_description">Stops Upright from being uninstalled, force-stopped or switched off during alarm hours, so half-asleep you can\'t get around the alarm.</string>
+    <string name="admin_description">Prevents uninstalling Upright while protection is on.</string>
+    <string name="admin_disable_warning">This turns off Upright\'s uninstall lock.</string>
+    <string name="protected_toast">Upright is protected until this morning\'s alarm is done.</string>
+</resources>

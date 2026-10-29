@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Upright" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF15131F</item>
+        <item name="android:statusBarColor">#FF15131F</item>
+        <item name="android:navigationBarColor">#FF15131F</item>
+    </style>
+</resources>
