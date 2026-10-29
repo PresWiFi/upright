@@ -40,6 +40,7 @@ class RingService : Service() {
     private var savedFilter = -1
     private var startedAt = 0L
     private var wakeLock: PowerManager.WakeLock? = null
+    private var hushed = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -75,15 +76,30 @@ class RingService : Service() {
         startVibration()
         scope.launch {
             while (isActive) {
-                if (Store.state.value.session?.phase != Phase.RINGING) {
+                val session = Store.state.value.session
+                if (session?.phase != Phase.RINGING) {
                     stopSelf()
                     break
                 }
-                applyVolume(am)
+                setHushed(session.isHushed(nowMs()))
+                if (!hushed) applyVolume(am)
                 // Renewed every tick so the CPU stays awake for as long as it rings, but never leaks.
                 wakeLock?.acquire(MINUTE_MS)
                 delay(1000)
             }
+        }
+    }
+
+    /** The hush button: pause sound and vibration, then pick up where they left off. */
+    private fun setHushed(on: Boolean) {
+        if (on == hushed) return
+        hushed = on
+        if (on) {
+            player?.pause()
+            ContextCompat.getSystemService(this, Vibrator::class.java)?.cancel()
+        } else {
+            player?.start()
+            startVibration()
         }
     }
 

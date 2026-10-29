@@ -87,9 +87,9 @@ class LogicTest {
         val settings = Settings(stillUpDelayMin = 10, stillUpWindowSec = 60)
         var s = startSession(alarm, ms(28, 7), test = false, rnd)
         assertEquals(Step.Scan("t"), s.currentStep())
-        s = s.completeStep(settings, ms(28, 7, 1))!!
+        s = s.completeStep(settings, ms(28, 7, 1))
         assertEquals(Step.Lights(), s.currentStep())
-        s = s.completeStep(settings, ms(28, 7, 2))!!
+        s = s.completeStep(settings, ms(28, 7, 2))
         assertEquals(Phase.WAITING, s.phase)
         assertEquals(ms(28, 7, 12), s.promptAt)
         assertNull(s.currentStep())
@@ -101,11 +101,11 @@ class LogicTest {
     @Test fun noStillUpEndsRightAway() {
         val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Lights()))
         val s = startSession(alarm, 0, false, rnd)
-        assertNull(s.completeStep(Settings(stillUpEnabled = false), 1))
+        assertEquals(Phase.DONE, s.completeStep(Settings(stillUpEnabled = false), 1).phase)
     }
 
     @Test fun testRunHasShortStillUp() {
-        val s = startSession(Alarm("a", 0, steps = listOf(Step.Lights())), 0, test = true, rnd).completeStep(Settings(), 0)!!
+        val s = startSession(Alarm("a", 0, steps = listOf(Step.Lights())), 0, test = true, rnd).completeStep(Settings(), 0)
         assertEquals(MINUTE_MS, s.promptAt)
     }
 
@@ -117,7 +117,7 @@ class LogicTest {
     @Test fun reRingSkipsMedsAlreadyDone() {
         val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Med("m"), Step.Scan("t")))
         val s = startSession(alarm, 0, false, rnd).copy(phase = Phase.PROMPT, medsDone = setOf("m"))
-        val r = s.reRing(alarm, rnd)
+        val r = s.reRing(alarm, rnd, 0)
         assertEquals(Phase.RINGING, r.phase)
         assertEquals(listOf<Step>(Step.Scan("t")), r.steps)
         assertEquals(1, r.rerings)
@@ -126,7 +126,7 @@ class LogicTest {
 
     @Test fun reRingWithOnlyMedsFallsBackToTyping() {
         val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Med("m")))
-        val r = startSession(alarm, 0, false, rnd).copy(medsDone = setOf("m")).reRing(alarm, rnd)
+        val r = startSession(alarm, 0, false, rnd).copy(medsDone = setOf("m")).reRing(alarm, rnd, 0)
         assertTrue(r.steps.single() is Step.Type)
     }
 
@@ -300,10 +300,127 @@ class LogicTest {
             meds = listOf(med),
             session = Session("a", 1, listOf(Step.Lights()), medsDone = setOf("m")),
             snoozes = mapOf("m@1" to 2L),
+            homeSnoozes = setOf("m@1"),
+            homeNet = HomeNet("192.168.1.1", "192.168.1.0/24", listOf("192.168.1.1"), "lan", "2601:0a:1b"),
             armed = Armed("a", 3),
+            routine = listOf(RoutineItem("r", "Shower", 10)),
+            routineRun = RoutineRun(1, listOf(RoutineItem("r", "Shower", 10))),
+            tamper = listOf(TamperEvent(1, TamperKind.HUSH, "45s")),
         )
         val back = json.decodeFromString(AppState.serializer(), json.encodeToString(AppState.serializer(), st))
         assertEquals(st, back)
         assertNotNull(json.decodeFromString(AppState.serializer(), """{"future":1}"""))
+    }
+
+    // ---------- v0.2: step timing, hush, routine, home snooze, tamper, weekly report ----------
+
+    @Test fun stepTimesAndUpAtAreRecorded() {
+        val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Scan("t"), Step.Lights()))
+        var s = startSession(alarm, ms(28, 7), false, rnd)
+        s = s.completeStep(Settings(), ms(28, 7, 3))
+        s = s.completeStep(Settings(), ms(28, 7, 4))
+        assertEquals(listOf(StepTime("scan", 3 * MINUTE_MS), StepTime("lights", MINUTE_MS)), s.stepTimes)
+        assertEquals(ms(28, 7, 4), s.upAt)
+        // A re-ring keeps the first "up" time.
+        s = s.toPrompt(Settings(), ms(28, 7, 14)).reRing(alarm, rnd, ms(28, 7, 15))
+        s = s.completeStep(Settings(), ms(28, 7, 16)).completeStep(Settings(), ms(28, 7, 17))
+        assertEquals(ms(28, 7, 4), s.upAt)
+        val w = AppState(session = s.copy(phase = Phase.PROMPT)).endSession(WakeOutcome.DONE, ms(28, 7, 30)).wakes.single()
+        assertEquals(4, w.stepTimes.size)
+        assertEquals(ms(28, 7, 4), w.upAt)
+    }
+
+    @Test fun hushIsLimitedAndTimed() {
+        val settings = Settings(hushSec = 45, hushMax = 2)
+        var s = startSession(Alarm("a", 0, steps = listOf(Step.Lights())), 0, false, rnd)
+        s = s.hush(settings, 1000)!!
+        assertTrue(s.isHushed(45_000))
+        assertFalse(s.isHushed(46_000))
+        assertNull(s.hush(settings, 2000)) // already hushed
+        s = s.hush(settings, 50_000)!!
+        assertNull(s.hush(settings, 200_000)) // used up
+        assertEquals(2, s.hushesUsed)
+        assertNull(s.copy(phase = Phase.WAITING, hushesUsed = 0).hush(settings, 0))
+    }
+
+    @Test fun routineRunsAndLogs() {
+        val items = listOf(RoutineItem("1", "Shower", 10), RoutineItem("2", "Dress", 5))
+        var st = AppState(routineRun = startRoutine(items, ms(28, 7), false))
+        val run = st.routineRun!!
+        assertEquals(ms(28, 7, 10), run.itemDeadline())
+        assertEquals(ms(28, 7, 15), run.finishBy())
+        assertEquals(ms(28, 7, 10), run.nextNudgeAt(ms(28, 7, 2)))
+        assertEquals(ms(28, 7, 17), run.nextNudgeAt(ms(28, 7, 12)))
+        assertNull(run.nextNudgeAt(ms(28, 8, 10)))
+        st = st.routineNext(ms(28, 7, 12), skipped = false)
+        assertEquals("Dress", st.routineRun!!.current()!!.name)
+        st = st.routineNext(ms(28, 7, 14), skipped = true)
+        assertNull(st.routineRun)
+        val log = st.routineLogs.single()
+        assertEquals(listOf(RoutineResult("Shower", 10, 12 * MINUTE_MS), RoutineResult("Dress", 5, 2 * MINUTE_MS, skipped = true)), log.results)
+        assertNull(startRoutine(emptyList(), 0, false))
+    }
+
+    @Test fun homeSnoozeEndsOnArrivalAndRestartsNag() {
+        val meds = listOf(med)
+        val slot = Slot("m", ms(28, 8))
+        var st = AppState(meds = meds).snoozeUntilHome(slot, ms(28, 8, 5))
+        assertEquals(ms(28, 12, 5), st.snoozes[slot.key]) // fallback 4h later
+        assertTrue(alertSlots(meds, emptyList(), st.snoozes, ms(28, 11), zone).isEmpty())
+        st = st.arriveHome(ms(28, 11))
+        assertTrue(st.homeSnoozes.isEmpty())
+        // Past the usual 3h nag limit from 8:00, but the nag clock restarted at arrival.
+        assertEquals(listOf(slot), alertSlots(meds, emptyList(), st.snoozes, ms(28, 11, 1), zone))
+        assertEquals(ms(28, 11, 11), nextReminderAt(meds, emptyList(), st.snoozes, ms(28, 11, 1), zone, 10))
+        // Logging the dose clears it.
+        assertTrue(st.snoozeUntilHome(slot, 0).logDose(slot, DoseStatus.TAKEN, ms(28, 11)).homeSnoozes.isEmpty())
+    }
+
+    @Test fun homeSnoozeFallbackBeforeMissed() {
+        val slot = Slot("m", ms(28, 8))
+        val st = AppState(meds = listOf(med)).snoozeUntilHome(slot, ms(28, 12))
+        assertEquals(ms(28, 13, 45), st.snoozes[slot.key])
+    }
+
+    @Test fun tamperLogIsCapped() {
+        var st = AppState()
+        repeat(310) { st = st.logTamper(TamperKind.BLOCKED_SCREEN, it.toLong()) }
+        assertEquals(300, st.tamper.size)
+        assertEquals(10L, st.tamper.first().at)
+        assertTrue(TamperKind.BLOCKED_SCREEN.isAttempt)
+        assertFalse(TamperKind.HUSH.isAttempt)
+    }
+
+    @Test fun weeklyStats() {
+        val start = LocalDate.of(2026, 10, 26) // Monday
+        assertEquals(start, weekStart(LocalDate.of(2026, 11, 1)))
+        val wakes = listOf(
+            WakeEvent("a", ms(26, 7), ms(26, 7, 20), 0, WakeOutcome.DONE, upAt = ms(26, 7, 4), stepTimes = listOf(StepTime("scan", 120_000), StepTime("lights", 40_000)), hushes = 1),
+            WakeEvent("a", ms(27, 7), ms(27, 7, 30), 1, WakeOutcome.DONE, upAt = ms(27, 7, 8), stepTimes = listOf(StepTime("scan", 240_000))),
+            WakeEvent("a", ms(28, 7), ms(28, 7, 1), 0, WakeOutcome.EMERGENCY, test = true),
+            WakeEvent("a", ms(20, 7), ms(20, 7, 20), 0, WakeOutcome.DONE, upAt = ms(20, 7, 10)),
+        )
+        val m = med.copy(times = listOf(8 * 60))
+        val doses = listOf(DoseEvent("m", ms(26, 8), ms(26, 8), DoseStatus.TAKEN), DoseEvent("m", ms(27, 8), ms(27, 8), DoseStatus.SKIPPED))
+        val st = AppState(
+            meds = listOf(m), doses = doses, wakes = wakes,
+            routineLogs = listOf(RoutineLog(ms(26, 7, 5), ms(26, 7, 30), listOf(RoutineResult("Shower", 10, 9 * MINUTE_MS), RoutineResult("Dress", 5, 8 * MINUTE_MS)))),
+            tamper = listOf(TamperEvent(ms(27, 7, 2), TamperKind.BLOCKED_SCREEN), TamperEvent(ms(27, 7, 3), TamperKind.HUSH)),
+        )
+        val now = ms(28, 12)
+        val w = weekStats(st, start, now, zone)
+        assertEquals(2, w.wakes)
+        assertEquals(6.0, w.avgUpMin!!, 0.001)
+        assertEquals(1, w.rerings)
+        assertEquals(1, w.cleanWakes)
+        assertEquals(1, w.hushes)
+        assertEquals("scan" to 180_000L, w.slowestStep)
+        assertEquals(1, w.medTaken)
+        assertEquals(2, w.medTotal) // 26 taken, 27 skipped; 28 is still due at noon, so not counted yet
+        assertEquals(1, w.routineOnTime)
+        assertEquals(2, w.routineItems)
+        assertEquals(1, w.attempts)
+        val lines = reportLines(w, weekStats(st, start.minusWeeks(1), now, zone))
+        assertTrue(lines.first(), lines.first().contains("4 min faster"))
     }
 }

@@ -41,6 +41,8 @@ data class Alarm(
     val enabled: Boolean = true,
     val label: String = "",
     val steps: List<Step> = emptyList(),
+    /** Start the morning routine once the wake-up steps are done. */
+    val routine: Boolean = true,
 )
 
 @Serializable
@@ -81,6 +83,8 @@ enum class Phase {
     WAITING,
     /** Asking "still up?"; no answer by [Session.deadline] means it rings again. */
     PROMPT,
+    /** Finished; the session is ended right after this. */
+    DONE,
 }
 
 @Serializable
@@ -96,7 +100,19 @@ data class Session(
     /** Meds already handled this morning, so a re-ring doesn't ask again. */
     val medsDone: Set<String> = emptySet(),
     val test: Boolean = false,
+    /** Alarm is silent until this time (the hush button). */
+    val hushUntil: Long = 0,
+    val hushesUsed: Int = 0,
+    /** When the current step was shown, for timing each step. */
+    val stepStartedAt: Long = 0,
+    val stepTimes: List<StepTime> = emptyList(),
+    /** First time every step was done (0 = not yet). */
+    val upAt: Long = 0,
 )
+
+/** How long one wake-up step took. [kind] is scan / lights / med / type. */
+@Serializable
+data class StepTime(val kind: String, val ms: Long)
 
 @Serializable
 enum class WakeOutcome { DONE, EMERGENCY }
@@ -109,7 +125,43 @@ data class WakeEvent(
     val rerings: Int,
     val outcome: WakeOutcome,
     val test: Boolean = false,
+    /** When the wake-up steps were first finished (0 for old records or emergency stops). */
+    val upAt: Long = 0,
+    val stepTimes: List<StepTime> = emptyList(),
+    val hushes: Int = 0,
 )
+
+/** One item of the morning routine, with a time budget. */
+@Serializable
+data class RoutineItem(val id: String, val name: String, val minutes: Int)
+
+@Serializable
+data class RoutineResult(val name: String, val budgetMin: Int, val tookMs: Long, val skipped: Boolean = false)
+
+/** The routine in progress after a wake-up. */
+@Serializable
+data class RoutineRun(
+    val startedAt: Long,
+    val items: List<RoutineItem>,
+    val index: Int = 0,
+    val itemStartedAt: Long = startedAt,
+    val results: List<RoutineResult> = emptyList(),
+    val test: Boolean = false,
+)
+
+@Serializable
+data class RoutineLog(val startedAt: Long, val endedAt: Long, val results: List<RoutineResult>, val test: Boolean = false)
+
+/** Something that looked like an attempt to get around the alarm, or a way out that was used. */
+@Serializable
+enum class TamperKind { BLOCKED_SCREEN, EMERGENCY_STOP, HUSH, STEP_SWAPPED, CODE_UNLOCK, WRONG_CODE, PROTECTION_OFF, ADMIN_OFF_ATTEMPT, ADMIN_OFF, GUARD_OFF, FORCE_STOPPED, KILLED }
+
+@Serializable
+data class TamperEvent(val at: Long, val kind: TamperKind, val detail: String = "")
+
+/** Enough about the home Wi-Fi to recognise it again without location access (see HomeNet.kt). */
+@Serializable
+data class HomeNet(val gateway: String, val subnet: String, val dns: List<String>, val domain: String = "", val v6Prefix: String = "")
 
 @Serializable
 data class Settings(
@@ -124,6 +176,10 @@ data class Settings(
     val codeHash: String? = null,
     val codeSalt: String? = null,
     val nagMin: Int = 10,
+    val hushSec: Int = 45,
+    val hushMax: Int = 2,
+    /** Weekly report notification (Sunday evening). */
+    val weeklyReport: Boolean = true,
 )
 
 /** The alarm that's currently scheduled with Android, so a reboot can tell if it was missed. */
@@ -141,5 +197,14 @@ data class AppState(
     val settings: Settings = Settings(),
     /** Dose slot key -> snoozed until (epoch ms). */
     val snoozes: Map<String, Long> = emptyMap(),
+    /** Snoozed dose slots that end early when you get home (their [snoozes] entry is the fallback time). */
+    val homeSnoozes: Set<String> = emptySet(),
+    val homeNet: HomeNet? = null,
     val armed: Armed? = null,
+    val routine: List<RoutineItem> = emptyList(),
+    val routineRun: RoutineRun? = null,
+    val routineLogs: List<RoutineLog> = emptyList(),
+    val tamper: List<TamperEvent> = emptyList(),
+    /** Last process exit already checked for force-stops (ApplicationExitInfo timestamp). */
+    val exitsCheckedAt: Long = 0,
 )

@@ -1,6 +1,8 @@
 package com.blakeriding.upright
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.app.AlarmManager
 import android.app.Application
 import android.app.NotificationManager
@@ -39,17 +41,76 @@ class App : Application() {
         // Any change to alarms, meds or the wake-up session re-plans what Android should wake us for.
         scope.launch {
             Store.state
-                .map { listOf(it.alarms, it.meds, it.doses, it.snoozes, it.session, it.settings) }
+                .map { listOf(it.alarms, it.meds, it.doses, it.snoozes, it.session, it.settings, it.routineRun) }
                 .distinctUntilChanged()
                 .collect { Scheduler.rescheduleAll(this@App) }
         }
+        // Keep the watch in step with the alarm.
+        scope.launch {
+            Store.state.map { WatchLink.snapshot(it) }.distinctUntilChanged().collect { WatchLink.push(this@App, it) }
+        }
+        // Keep the home-screen widget current.
+        scope.launch {
+            Store.state.map { listOf(it.meds, it.doses, it.armed) }.distinctUntilChanged().collect { MedWidget.refresh(this@App) }
+        }
+        scope.launch(Dispatchers.Default) { checkExits(this@App) }
     }
 }
 
+/**
+ * Android remembers why the app last stopped. A force-stop from Settings, or the system killing it
+ * mid-alarm, goes in the tamper log.
+ */
+private fun checkExits(context: Context) {
+    if (Build.VERSION.SDK_INT < 30) return
+    val since = Store.state.value.exitsCheckedAt
+    val exits = try {
+        context.getSystemService(ActivityManager::class.java).getHistoricalProcessExitReasons(context.packageName, 0, 20)
+    } catch (_: Exception) {
+        return
+    }.filter { it.timestamp > since }
+    if (exits.isEmpty()) return
+    // First run: start counting from now rather than logging old history.
+    if (since == 0L) {
+        Store.update { it.copy(exitsCheckedAt = exits.maxOf { e -> e.timestamp }) }
+        return
+    }
+    Store.update { st ->
+        var s = st
+        for (e in exits.sortedBy { it.timestamp }) {
+            val inUse = e.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+            s = when {
+                // Updating the app also stops it; that's not tampering.
+                e.reason == ApplicationExitInfo.REASON_USER_REQUESTED && UPDATE_WORDS.none { it in e.description.orEmpty().lowercase() } ->
+                    s.logTamper(TamperKind.FORCE_STOPPED, e.timestamp, e.description.orEmpty().take(80))
+                inUse && e.reason in KILL_REASONS -> s.logTamper(TamperKind.KILLED, e.timestamp, e.description.orEmpty().take(80))
+                else -> s
+            }
+        }
+        s.copy(exitsCheckedAt = exits.maxOf { it.timestamp })
+    }
+}
+
+private val UPDATE_WORDS = listOf("update", "replace", "install")
+
+@android.annotation.SuppressLint("InlinedApi") // Only read on Android 11+, see checkExits.
+private val KILL_REASONS = setOf(
+    ApplicationExitInfo.REASON_LOW_MEMORY, ApplicationExitInfo.REASON_OTHER,
+    ApplicationExitInfo.REASON_SIGNALED, ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
+)
+
 /** While active, Android refuses to uninstall the app. Turning it off is guarded by [GuardService]. */
 class AdminReceiver : DeviceAdminReceiver() {
-    override fun onDisableRequested(context: Context, intent: Intent): CharSequence =
-        context.getString(R.string.admin_disable_warning)
+    override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+        Store.init(context)
+        Store.update { it.logTamper(TamperKind.ADMIN_OFF_ATTEMPT, nowMs()) }
+        return context.getString(R.string.admin_disable_warning)
+    }
+
+    override fun onDisabled(context: Context, intent: Intent) {
+        Store.init(context)
+        Store.update { it.logTamper(TamperKind.ADMIN_OFF, nowMs()) }
+    }
 }
 
 fun zone(): ZoneId = ZoneId.systemDefault()

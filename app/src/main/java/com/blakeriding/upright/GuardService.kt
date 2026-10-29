@@ -15,6 +15,7 @@ import android.view.accessibility.AccessibilityEvent
 class GuardService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastToastAt = 0L
+    private var lastLogAt = 0L
     private val recheck = Runnable { if (active()) guard() }
     private val bringBack = Runnable {
         if (Store.state.value.session?.phase == Phase.RINGING) {
@@ -24,6 +25,12 @@ class GuardService : AccessibilityService() {
 
     override fun onServiceConnected() {
         Store.init(this)
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        // Switched off in accessibility settings (or the app was stopped).
+        if (Store.state.value.settings.protectionOn) Store.update { it.logTamper(TamperKind.GUARD_OFF, nowMs()) }
+        return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
@@ -55,13 +62,16 @@ class GuardService : AccessibilityService() {
     private fun guard() {
         val label = getString(R.string.app_name)
         // Check every window, not just the active one: a confirm dialog doesn't name the app, the page under it does.
-        val tampering = windows.any { window ->
-            val root = window.root ?: return@any false
-            isSensitive(root.packageName?.toString()) && root.findAccessibilityNodeInfosByText(label).isNotEmpty()
-        }
-        if (!tampering) return
+        val screen = windows.firstNotNullOfOrNull { window ->
+            val root = window.root ?: return@firstNotNullOfOrNull null
+            val pkg = root.packageName?.toString()
+            pkg.takeIf { isSensitive(it) && root.findAccessibilityNodeInfosByText(label).isNotEmpty() }
+        } ?: return
         performGlobalAction(GLOBAL_ACTION_BACK)
         val now = SystemClock.elapsedRealtime()
+        // One log entry per attempt, not one per back press.
+        if (now - lastLogAt > LOG_INTERVAL_MS) Store.update { it.logTamper(TamperKind.BLOCKED_SCREEN, nowMs(), screen) }
+        lastLogAt = now
         if (now - lastToastAt > TOAST_INTERVAL_MS) {
             lastToastAt = now
             toast(getString(R.string.protected_toast))
@@ -76,6 +86,7 @@ class GuardService : AccessibilityService() {
     private companion object {
         const val RECHECK_MS = 300L
         const val TOAST_INTERVAL_MS = 3000L
+        const val LOG_INTERVAL_MS = 30_000L
         const val BRING_BACK_MS = 1500L
 
         // Settings apps, installers and OEM phone-manager apps (OnePlus/Oppo use oplus/coloros names).

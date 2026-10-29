@@ -27,6 +27,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.blakeriding.upright.ALL_DAYS
 import com.blakeriding.upright.Settings
+import com.blakeriding.upright.Store
+import com.blakeriding.upright.TamperKind
+import com.blakeriding.upright.logTamper
+import com.blakeriding.upright.nowMs
 import com.blakeriding.upright.checkCode
 import com.blakeriding.upright.zone
 import java.time.Instant
@@ -98,7 +102,17 @@ fun CodeDialog(settings: Settings, why: String, onDismiss: () -> Unit, onOk: () 
                 if (wrong) Text("Wrong code", color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { TextButton(onClick = { if (settings.checkCode(code)) onOk() else wrong = true }) { Text("Unlock") } },
+        confirmButton = {
+            TextButton(onClick = {
+                if (settings.checkCode(code)) {
+                    Store.update { it.logTamper(TamperKind.CODE_UNLOCK, nowMs(), why.take(60)) }
+                    onOk()
+                } else {
+                    wrong = true
+                    Store.update { it.logTamper(TamperKind.WRONG_CODE, nowMs()) }
+                }
+            }) { Text("Unlock") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

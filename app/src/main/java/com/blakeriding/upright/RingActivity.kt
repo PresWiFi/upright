@@ -55,7 +55,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import kotlin.random.Random
 
 /** The screen you see while the alarm rings, during the still-up wait, and for the still-up check. */
 class RingActivity : ComponentActivity() {
@@ -122,6 +121,8 @@ private fun RingScreen(nfc: SharedFlow<String>, onClose: () -> Unit, onUnlock: (
                             Text("You didn't answer the still-up check, so it's ringing again.", color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                             Spacer(Modifier.height(12.dp))
                         }
+                        HushButton(session, state.settings)
+                        Spacer(Modifier.height(12.dp))
                         Text("Step ${session.stepIndex + 1} of ${session.steps.size}", style = MaterialTheme.typography.labelLarge)
                         Spacer(Modifier.height(16.dp))
                         val step = session.currentStep()
@@ -130,16 +131,15 @@ private fun RingScreen(nfc: SharedFlow<String>, onClose: () -> Unit, onUnlock: (
                             if (step != null) StepView(step, state, nfc, onUnlock)
                         }
                     }
-                    Phase.WAITING -> WaitingView(session, state.settings, onClose)
+                    Phase.WAITING -> WaitingView(session, state, onClose)
                     Phase.PROMPT -> PromptView(session)
+                    Phase.DONE -> {}
                 }
             }
             if (session.phase == Phase.RINGING) {
                 val ctx = LocalContext.current
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        Store.update { s -> s.copy(session = s.session?.swapForTyping(Random.Default)) }
-                    }) { Text("Can't do this step") }
+                    TextButton(onClick = { Wake.swapStep() }) { Text("Can't do this step") }
                     TextButton(onClick = { showEmergency = true }) { Text("Emergency") }
                 }
                 if (showEmergency) EmergencyDialog(state.settings, onDismiss = { showEmergency = false }, onOk = {
@@ -318,8 +318,26 @@ private fun MedView(med: Med, state: AppState, nfc: SharedFlow<String>, onUnlock
     }
 }
 
+/** Quick way to silence it for a bad moment: a short pause, a couple of times per alarm. */
 @Composable
-private fun WaitingView(session: Session, settings: Settings, onClose: () -> Unit) {
+private fun HushButton(session: Session, settings: Settings) {
+    val ctx = LocalContext.current
+    var now by remember { mutableLongStateOf(nowMs()) }
+    LaunchedEffect(Unit) { while (true) { now = nowMs(); delay(500) } }
+    val left = settings.hushMax - session.hushesUsed
+    when {
+        session.isHushed(now) -> Text(
+            "Hushed · rings again in ${(session.hushUntil - now) / 1000 + 1}s",
+            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.tertiary,
+        )
+        left > 0 -> OutlinedButton(onClick = { Wake.hush(ctx) }) { Text("Hush ${settings.hushSec}s ($left left)") }
+        else -> Text("No hushes left", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun WaitingView(session: Session, state: AppState, onClose: () -> Unit) {
+    val settings = state.settings
     var now by remember { mutableLongStateOf(nowMs()) }
     LaunchedEffect(Unit) { while (true) { now = nowMs(); delay(1000) } }
     val left = ((session.promptAt - now) / 1000).coerceAtLeast(0)
@@ -330,6 +348,10 @@ private fun WaitingView(session: Session, settings: Settings, onClose: () -> Uni
             "Answer it within ${settings.stillUpWindowSec} seconds or the alarm starts again.",
         textAlign = TextAlign.Center,
     )
+    state.routineRun?.let {
+        Spacer(Modifier.height(16.dp))
+        com.blakeriding.upright.ui.RoutineCard(it)
+    }
     Spacer(Modifier.height(24.dp))
     OutlinedButton(onClick = onClose) { Text("Close") }
 }
@@ -370,7 +392,12 @@ private fun EmergencyDialog(settings: Settings, onDismiss: () -> Unit, onOk: () 
             }
         },
         confirmButton = {
-            if (settings.codeHash != null) TextButton(onClick = { if (settings.checkCode(code)) onOk() else wrong = true }) { Text("Stop alarm") }
+            if (settings.codeHash != null) TextButton(onClick = {
+                if (settings.checkCode(code)) onOk() else {
+                    wrong = true
+                    Store.update { it.logTamper(TamperKind.WRONG_CODE, nowMs(), "emergency stop") }
+                }
+            }) { Text("Stop alarm") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

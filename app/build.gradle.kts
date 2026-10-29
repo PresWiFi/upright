@@ -12,8 +12,8 @@ android {
         applicationId = "com.blakeriding.upright"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -50,6 +50,8 @@ dependencies {
     implementation(libs.androidx.material.icons.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.play.code.scanner)
+    implementation(libs.glance.appwidget)
+    implementation(libs.play.wearable)
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation(libs.junit)
 }

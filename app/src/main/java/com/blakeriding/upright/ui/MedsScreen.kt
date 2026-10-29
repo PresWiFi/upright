@@ -48,6 +48,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.blakeriding.upright.AppState
 import com.blakeriding.upright.DoseStatus
+import com.blakeriding.upright.HomeWifi
+import com.blakeriding.upright.snoozeUntilHome
+import com.blakeriding.upright.toast
 import com.blakeriding.upright.Med
 import com.blakeriding.upright.Notifs
 import com.blakeriding.upright.Slot
@@ -92,11 +95,26 @@ fun MedsScreen(state: AppState, nfc: SharedFlow<String>) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("${fmtTime(slot.at)}  ${med.name} ${med.dose}".trim())
-                            Text(stateLabel(st), style = MaterialTheme.typography.bodySmall, color = stateColor(st))
+                            val waitingHome = slot.key in state.homeSnoozes
+                            Text(
+                                if (waitingHome && st == SlotState.DUE) "Reminding you when you get home" else stateLabel(st),
+                                style = MaterialTheme.typography.bodySmall, color = stateColor(st),
+                            )
                         }
                         when (st) {
                             SlotState.DUE, SlotState.UPCOMING, SlotState.MISSED -> {
                                 TextButton(onClick = { log(slot, DoseStatus.TAKEN) }) { Text("Taken") }
+                                if (st == SlotState.DUE && state.homeNet != null && slot.key !in state.homeSnoozes) {
+                                    TextButton(onClick = {
+                                        if (HomeWifi.atHome(ctx)) {
+                                            ctx.toast("You're home already")
+                                        } else {
+                                            Store.update { it.snoozeUntilHome(slot, nowMs()) }
+                                            Notifs.cancelMed(ctx, slot)
+                                            HomeWifi.sync(ctx)
+                                        }
+                                    }) { Text("At home") }
+                                }
                                 TextButton(onClick = { log(slot, DoseStatus.SKIPPED) }) { Text("Skip") }
                             }
                             else -> TextButton(onClick = { Store.update { it.undoDose(slot) } }) { Text("Undo") }

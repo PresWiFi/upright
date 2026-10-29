@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Upright"
 include(":app")
+include(":wear")

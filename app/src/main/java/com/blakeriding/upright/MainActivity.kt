@@ -39,14 +39,24 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 class MainActivity : ComponentActivity() {
     /** Card taps while the app is open, for registering NFC tags. */
     private val nfc = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Tab requested by a notification or the widget. */
+    private val requestedTab = mutableIntStateOf(-1)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestedTab.intValue = intent.getIntExtra(EXTRA_TAB, -1)
         setContent {
             UprightTheme {
                 val state by Store.state.collectAsStateWithLifecycle()
                 var tab by rememberSaveable { mutableIntStateOf(if (state.alarms.isEmpty() && !state.settings.protectionOn) 3 else 0) }
+                val asked = requestedTab.intValue
+                androidx.compose.runtime.LaunchedEffect(asked) {
+                    if (asked >= 0) {
+                        tab = asked
+                        requestedTab.intValue = -1
+                    }
+                }
                 Scaffold(
                     bottomBar = {
                         NavigationBar {
@@ -80,6 +90,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        requestedTab.intValue = intent.getIntExtra(EXTRA_TAB, -1)
+    }
+
     override fun onResume() {
         super.onResume()
         startCardReader { nfc.tryEmit(it) }
@@ -90,8 +105,10 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
-    private companion object {
-        val TABS = listOf(
+    companion object {
+        const val EXTRA_TAB = "tab"
+
+        private val TABS = listOf(
             "Alarms" to Icons.Default.Notifications,
             "Meds" to Icons.Default.Favorite,
             "History" to Icons.Default.DateRange,

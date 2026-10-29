@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Recognising the home Wi-Fi (network details only, no location) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Wake-up steps -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
@@ -67,6 +69,27 @@
             android:name=".MedActionReceiver"
             android:directBootAware="true"
             android:exported="false" />
+
+        <receiver
+            android:name=".RoutineActionReceiver"
+            android:directBootAware="true"
+            android:exported="false" />
+
+        <receiver
+            android:name=".HomeNetReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".MedWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/med_widget_info" />
+        </receiver>
 
         <receiver
             android:name=".BootReceiver"

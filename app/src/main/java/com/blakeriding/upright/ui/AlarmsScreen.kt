@@ -63,9 +63,11 @@ import java.time.Duration
 fun AlarmsScreen(state: AppState) {
     var editing by remember { mutableStateOf<Alarm?>(null) }
     var pendingToggle by remember { mutableStateOf<Alarm?>(null) }
+    var editingRoutine by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             item { NextAlarmHeader(state) }
+            state.routineRun?.let { run -> item { RoutineCard(run, Modifier.padding(bottom = 8.dp)) } }
             items(state.alarms.sortedBy { it.minuteOfDay }, key = { it.id }) { alarm ->
                 val locked = alarmLocked(state, alarm, nowZ())
                 Card(Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { editing = alarm }) {
@@ -84,6 +86,18 @@ fun AlarmsScreen(state: AppState) {
                     }
                 }
             }
+            item {
+                Card(Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { editingRoutine = true }) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Morning routine", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (state.routine.isEmpty()) "Add a checklist that starts once you're up (shower, dress, out the door)."
+                            else state.routine.joinToString(" → ") { it.name } + " · ${state.routine.sumOf { it.minutes }} min",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             item { Spacer(Modifier.height(88.dp)) }
         }
         FloatingActionButton(
@@ -92,6 +106,7 @@ fun AlarmsScreen(state: AppState) {
         ) { Icon(Icons.Default.Add, "Add alarm") }
     }
     editing?.let { AlarmEditor(it, state, onClose = { editing = null }) }
+    if (editingRoutine) RoutineEditor(state.routine, onClose = { editingRoutine = false })
     pendingToggle?.let { a ->
         CodeDialog(state.settings, "This alarm is coming up soon, so turning it off needs your emergency code.",
             onDismiss = { pendingToggle = null }, onOk = { setEnabled(a.id, false); pendingToggle = null })
@@ -189,6 +204,13 @@ private fun AlarmEditor(original: Alarm, state: AppState, onClose: () -> Unit) {
                             DropdownMenuItem(text = { Text("Take ${med.name}") }, onClick = { alarm = alarm.copy(steps = alarm.steps + Step.Med(med.id)); addMenu = false })
                         }
                         if (state.tags.isEmpty()) DropdownMenuItem(text = { Text("Add NFC cards or barcodes in Settings → Tags") }, onClick = { addMenu = false }, enabled = false)
+                    }
+                }
+
+                if (state.routine.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp)) {
+                        Text("Start morning routine after", Modifier.weight(1f))
+                        Switch(alarm.routine, onCheckedChange = { alarm = alarm.copy(routine = it) })
                     }
                 }
 

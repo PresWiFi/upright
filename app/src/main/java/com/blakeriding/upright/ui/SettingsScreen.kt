@@ -53,6 +53,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.blakeriding.upright.AppState
+import com.blakeriding.upright.HomeWifi
+import com.blakeriding.upright.TamperEvent
+import com.blakeriding.upright.TamperKind
+import com.blakeriding.upright.WatchLink
+import com.blakeriding.upright.logTamper
+import com.blakeriding.upright.nowMs
 import com.blakeriding.upright.Step
 import com.blakeriding.upright.Store
 import com.blakeriding.upright.Tag
@@ -143,8 +149,12 @@ fun SettingsScreen(state: AppState, nfc: SharedFlow<String>) {
                 )
             }
             Switch(s.protectionOn, enabled = ready || s.protectionOn, onCheckedChange = { on ->
-                if (!on && guarding) needCode = "Protection is active right now. Enter your emergency code to turn it off." to { update { it.copy(protectionOn = false) }; Unit }
-                else update { it.copy(protectionOn = on) }
+                if (!on && guarding) needCode = "Protection is active right now. Enter your emergency code to turn it off." to {
+                    Store.update { it.copy(settings = it.settings.copy(protectionOn = false)).logTamper(TamperKind.PROTECTION_OFF, nowMs(), "during alarm hours") }
+                    Unit
+                }
+                else if (!on) Store.update { it.copy(settings = it.settings.copy(protectionOn = false)).logTamper(TamperKind.PROTECTION_OFF, nowMs()) }
+                else update { it.copy(protectionOn = true) }
             })
         }
         if (s.codeHash != null) {
@@ -199,6 +209,21 @@ fun SettingsScreen(state: AppState, nfc: SharedFlow<String>) {
         SectionTitle("Med reminders")
         Text("Repeat every ${s.nagMin} min until answered (for up to 3 hours)")
         Slider(s.nagMin.toFloat(), { v -> update { it.copy(nagMin = v.roundToInt()) } }, valueRange = 5f..30f, steps = 4)
+
+        SectionTitle("Home Wi-Fi")
+        HomeWifiSection(state, tick)
+
+        SectionTitle("Galaxy Watch")
+        WatchSection(tick)
+
+        SectionTitle("Weekly report")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Notification on Sunday evening", Modifier.weight(1f))
+            Switch(s.weeklyReport, onCheckedChange = { on -> update { it.copy(weeklyReport = on) } })
+        }
+
+        SectionTitle("Tamper log")
+        TamperSection(state)
         Spacer(Modifier.height(48.dp))
     }
 
@@ -317,4 +342,98 @@ fun AddTagDialog(nfc: SharedFlow<String>, defaultName: String, onClose: () -> Un
         confirmButton = {},
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun HomeWifiSection(state: AppState, tick: Int) {
+    val ctx = LocalContext.current
+    val home = state.homeNet
+    @Suppress("UNUSED_EXPRESSION") tick
+    val atHome = home != null && HomeWifi.atHome(ctx)
+    Text(
+        when {
+            home == null -> "Save your home Wi-Fi to get an \"At home\" option on med reminders: it reminds you again as soon as you get home."
+            atHome -> "Saved. You're on it now."
+            else -> "Saved. You're not on it right now."
+        },
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        "Recognised by your router's network details, not the Wi-Fi name, so Upright doesn't need location access. " +
+            "If home isn't detected, the reminder comes back after a few hours anyway.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row {
+        OutlinedButton(onClick = {
+            val now = HomeWifi.current(ctx)
+            if (now == null) ctx.toast("Connect to your home Wi-Fi first") else {
+                Store.update { it.copy(homeNet = now) }
+                ctx.toast("Saved as home")
+            }
+        }) { Text(if (home == null) "I'm home: save this Wi-Fi" else "Re-save (I'm home now)") }
+        if (home != null) TextButton(onClick = { Store.update { it.copy(homeNet = null, homeSnoozes = emptySet()) } }) { Text("Forget") }
+    }
+}
+
+@Composable
+private fun WatchSection(tick: Int) {
+    val ctx = LocalContext.current
+    var found by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(tick) { WatchLink.checkWatch(ctx) { found = it } }
+    Text(
+        when (found) {
+            null -> "Looking for the watch…"
+            true -> "Connected. The watch buzzes while the alarm rings, and rings by itself if the phone can't."
+            false -> "No watch with Upright found. Install the watch app (see the README) and keep Bluetooth on."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = if (found == true) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+private fun tamperLabel(e: TamperEvent): String = when (e.kind) {
+    TamperKind.BLOCKED_SCREEN -> "Blocked a settings screen" + if (e.detail.isNotBlank()) " (${e.detail})" else ""
+    TamperKind.EMERGENCY_STOP -> "Emergency stop used"
+    TamperKind.HUSH -> "Hushed the alarm"
+    TamperKind.STEP_SWAPPED -> "Swapped a ${e.detail} step for typing"
+    TamperKind.CODE_UNLOCK -> "Unlocked with the emergency code"
+    TamperKind.WRONG_CODE -> "Wrong emergency code"
+    TamperKind.PROTECTION_OFF -> "Protection turned off" + if (e.detail.isNotBlank()) " ${e.detail}" else ""
+    TamperKind.ADMIN_OFF_ATTEMPT -> "Tried to turn off the uninstall lock"
+    TamperKind.ADMIN_OFF -> "Uninstall lock turned off"
+    TamperKind.GUARD_OFF -> "Settings guard switched off"
+    TamperKind.FORCE_STOPPED -> "Upright was force-stopped or closed" + if (e.detail.isNotBlank()) " (${e.detail})" else ""
+    TamperKind.KILLED -> "Android stopped Upright while it was busy"
+}
+
+@Composable
+private fun TamperSection(state: AppState) {
+    var showAll by remember { mutableStateOf(false) }
+    Text(
+        "Every attempt to get around the alarm, and every way out that was used.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val recent = state.tamper.asReversed()
+    if (recent.isEmpty()) Text("Nothing yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    recent.take(5).forEach { TamperRow(it) }
+    if (recent.size > 5) TextButton(onClick = { showAll = true }) { Text("See all ${recent.size}") }
+    if (showAll) AlertDialog(
+        onDismissRequest = { showAll = false },
+        title = { Text("Tamper log") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { recent.forEach { TamperRow(it) } } },
+        confirmButton = { TextButton(onClick = { showAll = false }) { Text("Close") } },
+    )
+}
+
+private val tamperTime = java.time.format.DateTimeFormatter.ofPattern("EEE MMM d, h:mm a")
+
+@Composable
+private fun TamperRow(e: TamperEvent) {
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text(tamperLabel(e))
+        Text(
+            java.time.Instant.ofEpochMilli(e.at).atZone(com.blakeriding.upright.zone()).format(tamperTime),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sun coming up over the horizon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFB547" android:pathData="M36,62 A18,18 0 0,1 72,62 Z" />
+    <path android:fillColor="#FFFFB547" android:pathData="M32,66 H76 V70 H32 Z" />
+    <path android:fillColor="#FFFFB547" android:pathData="M52,30 H56 V38 H52 Z" />
+    <path android:fillColor="#FFFFB547" android:pathData="M30.3,40.1 L33.1,37.3 L38.8,43 L36,45.8 Z" />
+    <path android:fillColor="#FFFFB547" android:pathData="M77.7,40.1 L74.9,37.3 L69.2,43 L72,45.8 Z" />
+</vector>

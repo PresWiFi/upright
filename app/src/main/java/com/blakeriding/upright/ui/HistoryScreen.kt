@@ -30,7 +30,10 @@ import com.blakeriding.upright.medStreak
 import com.blakeriding.upright.nowMs
 import com.blakeriding.upright.slotState
 import com.blakeriding.upright.toast
+import com.blakeriding.upright.reportLines
 import com.blakeriding.upright.wakeStreak
+import com.blakeriding.upright.weekStart
+import com.blakeriding.upright.weekStats
 import com.blakeriding.upright.zone
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -57,6 +60,27 @@ fun HistoryScreen(state: AppState) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StreakCard("Mornings in a row", wakeStreak(state.wakes), Modifier.weight(1f))
                 StreakCard("Days all meds taken", medStreak(state.meds, state.doses, now, zone()), Modifier.weight(1f))
+            }
+        }
+        item {
+            val start = weekStart(today)
+            val thisWeek = weekStats(state, start, now, zone())
+            val lastWeek = weekStats(state, start.minusWeeks(1), now, zone())
+            SectionTitle("This week")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    reportLines(thisWeek, lastWeek).forEach { Text("• $it", Modifier.padding(vertical = 2.dp)) }
+                }
+            }
+            if (lastWeek.wakes > 0 || lastWeek.medTotal > 0) {
+                SectionTitle("Last week")
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        reportLines(lastWeek, weekStats(state, start.minusWeeks(2), now, zone())).forEach {
+                            Text("• $it", Modifier.padding(vertical = 2.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             }
         }
         item { SectionTitle("Last 30 days") }

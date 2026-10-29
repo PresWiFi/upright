@@ -13,11 +13,18 @@ object Scheduler {
     const val ACTION_DEADLINE = "com.blakeriding.upright.DEADLINE"
     const val ACTION_MEDS = "com.blakeriding.upright.MEDS"
     const val ACTION_IM_UP = "com.blakeriding.upright.IM_UP"
+    const val ACTION_ROUTINE = "com.blakeriding.upright.ROUTINE"
+    const val ACTION_REPORT = "com.blakeriding.upright.REPORT"
+
+    /** Weekly report goes out Sunday at this time. */
+    private const val REPORT_MINUTE = 19 * 60
 
     fun rescheduleAll(context: Context) {
         scheduleAlarm(context)
         scheduleSession(context)
         scheduleMeds(context)
+        scheduleRoutine(context)
+        scheduleReport(context)
     }
 
     private fun pi(context: Context, action: String): PendingIntent =
@@ -72,6 +79,34 @@ object Scheduler {
         if (s?.phase == Phase.PROMPT) alarmClock(context, s.deadline, ACTION_DEADLINE) else cancel(context, ACTION_DEADLINE)
     }
 
+    /** Exact when allowed, but not an alarm clock (no alarm icon in the status bar). */
+    private fun exactQuiet(context: Context, at: Long, action: String) {
+        val am = context.getSystemService(AlarmManager::class.java)
+        try {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi(context, action))
+        } catch (_: SecurityException) {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi(context, action))
+        }
+    }
+
+    private fun scheduleRoutine(context: Context) {
+        val at = Store.state.value.routineRun?.nextNudgeAt(nowMs())
+        // An abandoned routine (null) still gets one more wake-up so it can be closed.
+        if (Store.state.value.routineRun == null) cancel(context, ACTION_ROUTINE) else exactQuiet(context, at ?: nowMs() + 1000, ACTION_ROUTINE)
+    }
+
+    private fun scheduleReport(context: Context) {
+        if (!Store.state.value.settings.weeklyReport) {
+            cancel(context, ACTION_REPORT)
+            return
+        }
+        val now = nowZ()
+        var date = now.toLocalDate().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.SUNDAY))
+        if (epochAt(date, REPORT_MINUTE, now.zone) <= now.toInstant().toEpochMilli()) date = date.plusWeeks(1)
+        context.getSystemService(AlarmManager::class.java)
+            .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, epochAt(date, REPORT_MINUTE, now.zone), pi(context, ACTION_REPORT))
+    }
+
     fun scheduleMeds(context: Context) {
         val st = Store.state.value
         val at = nextReminderAt(st.meds, st.doses, st.snoozes, nowMs(), zone(), st.settings.nagMin)
@@ -79,11 +114,6 @@ object Scheduler {
             cancel(context, ACTION_MEDS)
             return
         }
-        val am = context.getSystemService(AlarmManager::class.java)
-        try {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi(context, ACTION_MEDS))
-        } catch (_: SecurityException) {
-            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi(context, ACTION_MEDS))
-        }
+        exactQuiet(context, at, ACTION_MEDS)
     }
 }
