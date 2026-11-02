@@ -16,12 +16,25 @@ android {
         versionName = "0.3.0"
     }
 
+    // Release key lives outside the repo: set upright.keystore and upright.keystorePassword in
+    // ~/.gradle/gradle.properties. Without them, release builds fall back to the debug key.
+    val releaseKey = providers.gradleProperty("upright.keystore").orNull
+    signingConfigs {
+        if (releaseKey != null) create("release") {
+            storeFile = file(releaseKey)
+            storePassword = providers.gradleProperty("upright.keystorePassword").get()
+            keyAlias = "upright"
+            keyPassword = storePassword
+        }
+    }
+    if (releaseKey == null) logger.warn("upright.keystore not set: release APK will be signed with the debug key")
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseKey != null) "release" else "debug")
         }
     }
     compileOptions {

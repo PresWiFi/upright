@@ -75,7 +75,14 @@ Needs JDK 17 and the Android SDK (compileSdk 37).
 ./gradlew assembleRelease       # app/build/outputs/apk/release/app-release.apk and wear/build/outputs/apk/release/wear-release.apk
 ```
 
-Release builds are signed with the debug key on purpose, so they install without a keystore.
+Release builds are signed with the key named in `~/.gradle/gradle.properties`:
+
+```
+upright.keystore=/path/to/upright-release.jks
+upright.keystorePassword=...
+```
+
+Without those lines they fall back to the debug key. Updates only install over a build signed with the same key, so keep a backup of the keystore and its password. Releases from 0.3.0 on use a new key; 0.1.0 and 0.2.0 have to be uninstalled before installing 0.3.0.
 If you build from WSL, copy the project onto the Linux filesystem first; Gradle on `/mnt/c` breaks on file modes.
 
 ## Code map
