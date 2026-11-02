@@ -15,8 +15,6 @@ import java.time.format.FormatStyle
 object Notifs {
     private const val CH_RING = "ring"
     private const val CH_STILL_UP = "still_up"
-    private const val CH_MEDS = "meds"
-    private const val CH_REFILL = "refill"
     private const val CH_ROUTINE = "routine"
     private const val CH_ROUTINE_NUDGE = "routine_nudge"
     private const val CH_REPORT = "report"
@@ -36,12 +34,13 @@ object Notifs {
                 setBypassDnd(true)
             },
             NotificationChannel(CH_STILL_UP, "Still up? check", NotificationManager.IMPORTANCE_HIGH).apply { setBypassDnd(true) },
-            NotificationChannel(CH_MEDS, "Med reminders", NotificationManager.IMPORTANCE_HIGH),
-            NotificationChannel(CH_REFILL, "Refill warnings", NotificationManager.IMPORTANCE_DEFAULT),
             NotificationChannel(CH_ROUTINE, "Morning routine", NotificationManager.IMPORTANCE_LOW),
             NotificationChannel(CH_ROUTINE_NUDGE, "Morning routine nudges", NotificationManager.IMPORTANCE_HIGH),
             NotificationChannel(CH_REPORT, "Weekly report", NotificationManager.IMPORTANCE_DEFAULT),
         ))
+        // Med tracking was removed: deleting its channels also clears any leftover reminders.
+        nm.deleteNotificationChannel("meds")
+        nm.deleteNotificationChannel("refill")
     }
 
     private fun ringScreen(context: Context): PendingIntent =
@@ -88,74 +87,6 @@ object Notifs {
     }
 
     fun cancelStillUp(context: Context) = context.getSystemService(NotificationManager::class.java).cancel(ID_STILL_UP)
-
-    private fun medNotifId(slot: Slot) = 1000 + (slot.key.hashCode() and 0xFFFFFF)
-
-    fun cancelMed(context: Context, slot: Slot) =
-        context.getSystemService(NotificationManager::class.java).cancel(medNotifId(slot))
-
-    private fun medAction(context: Context, action: String, slot: Slot, label: String): NotificationCompat.Action {
-        val pi = PendingIntent.getBroadcast(
-            context, (slot.key + action).hashCode(),
-            Intent(context, MedActionReceiver::class.java).setAction(action)
-                .putExtra(MedActionReceiver.EXTRA_MED, slot.medId).putExtra(MedActionReceiver.EXTRA_AT, slot.at),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        return NotificationCompat.Action(0, label, pi)
-    }
-
-    /** Alerts for every due dose (re-alerting until answered), and clears ones already logged. */
-    @SuppressLint("MissingPermission")
-    fun postMedAlerts(context: Context) {
-        if (!canNotify(context)) return
-        val st = Store.state.value
-        val now = nowMs()
-        val nm = context.getSystemService(NotificationManager::class.java)
-        val alerts = alertSlots(st.meds, st.doses, st.snoozes, now, zone())
-        val fmt = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
-        for (slot in alerts) {
-            val med = st.meds.find { it.id == slot.medId } ?: continue
-            val due = Instant.ofEpochMilli(slot.at).atZone(zone()).format(fmt)
-            val title = if (med.dose.isBlank()) med.name else "${med.name} ${med.dose}"
-            val n = NotificationCompat.Builder(context, CH_MEDS)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("Take $title")
-                .setContentText("Due $due")
-                .setSubText(if (med.needsRefill()) "Running low" else null)
-                .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setOngoing(true)
-                .setContentIntent(mainScreen(context))
-                .addAction(medAction(context, MedActionReceiver.ACTION_TAKEN, slot, "Taken"))
-                .addAction(medAction(context, MedActionReceiver.ACTION_SNOOZE, slot, "Snooze 15m"))
-                .addAction(
-                    // "Until home" only makes sense when home is set up and you're not there.
-                    if (st.homeNet != null && !HomeWifi.atHome(context)) medAction(context, MedActionReceiver.ACTION_HOME, slot, "Until home")
-                    else medAction(context, MedActionReceiver.ACTION_SKIP, slot, "Skip"),
-                )
-                .build()
-            nm.notify(medNotifId(slot), n)
-        }
-        // Clear reminders for doses that were logged somewhere else (app, alarm) or became missed.
-        val stillDue = dueSlots(st.meds, st.doses, now, zone()).map { medNotifId(it) }.toSet()
-        nm.activeNotifications.filter { it.id >= 1000 && it.id !in stillDue }.forEach { nm.cancel(it.id) }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun maybeRefillWarning(context: Context, medId: String) {
-        if (!canNotify(context)) return
-        val med = Store.state.value.meds.find { it.id == medId } ?: return
-        if (!med.needsRefill()) return
-        val days = med.daysLeft()?.toInt() ?: return
-        val n = NotificationCompat.Builder(context, CH_REFILL)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Refill ${med.name} soon")
-            .setContentText("About $days day${if (days == 1) "" else "s"} left")
-            .setContentIntent(mainScreen(context))
-            .setAutoCancel(true)
-            .build()
-        context.getSystemService(NotificationManager::class.java).notify(500 + (medId.hashCode() and 0xFF), n)
-    }
 
     private fun routineAction(context: Context, action: String, label: String): NotificationCompat.Action =
         NotificationCompat.Action(0, label, PendingIntent.getBroadcast(
@@ -209,7 +140,7 @@ object Notifs {
             .setContentText(lines.first())
             .setStyle(NotificationCompat.InboxStyle().also { style -> lines.forEach { style.addLine(it) } })
             .setContentIntent(PendingIntent.getActivity(
-                context, 5, Intent(context, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, 2), PendingIntent.FLAG_IMMUTABLE,
+                context, 5, Intent(context, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, 1), PendingIntent.FLAG_IMMUTABLE,
             ))
             .setAutoCancel(true)
             .build()

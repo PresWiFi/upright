@@ -1,6 +1,6 @@
 # Upright
 
-An Android alarm that makes you get out of bed, and is hard to get rid of when you're half asleep. Includes a simple med tracker.
+An Android alarm that makes you get out of bed, and is hard to get rid of when you're half asleep.
 
 Personal use, sideloaded. Not for the Play Store (it uses device admin and an accessibility service on purpose).
 
@@ -11,8 +11,8 @@ Personal use, sideloaded. Not for the Play Store (it uses device admin and an ac
 - Survives reboots. If the phone was off at alarm time, it rings as soon as the phone turns back on (up to 6 hours late).
 - To stop it, you finish the steps you picked, in order:
   - **Scan a tag**: tap an NFC card/sticker or scan a barcode/QR code. Put them far from bed.
+  - **Scan one of several tags**: any one of the tags you pick counts (handy with a tag in each room, or a spare card).
   - **Lights on**: the light sensor has to read bright for 30 seconds.
-  - **Take a med**: scan the bottle (if it has a tag), then tap Taken or Skip (with a reason).
 - **Still up?** 10 minutes after you finish, it asks "still up?". No answer within 60 seconds and it rings again.
 - **Can't do this step**: swaps the current step for typing a 24-character code (lost card, broken sensor...).
 - **Hush**: silences the alarm for 45 seconds, twice per alarm, for a bad moment. Each use is logged.
@@ -33,15 +33,11 @@ Personal use, sideloaded. Not for the Play Store (it uses device admin and an ac
 - Changing, turning off or deleting an alarm within those 2 hours needs the emergency code.
 - Outside alarm hours everything is unlocked, so daytime you can still change things.
 
-**Meds**
-- Meds with times and days, reminders that repeat every 10 minutes (up to 3 hours) until you tap Taken, Snooze or Skip.
-- Pill count goes down as you log, with a warning a set number of days before you run out.
-- **At home**: snooze a reminder until you get home. Upright recognises your home Wi-Fi by its network details (router address, subnet, DNS), not its name, so it needs no location access. If home isn't detected, the reminder comes back after a few hours anyway.
-- Home-screen widget: today's doses with one-tap **Take**, and your next alarm.
-- History: last 30 days, mornings-in-a-row and days-all-meds-taken streaks, and CSV export.
+**History**
+- Last 30 days, mornings-in-a-row streak, and CSV export.
 
 **Weekly report** (History tab, plus a notification Sunday evening)
-- How fast you got up, how often the still-up check caught you, your slowest step, hushes and emergency stops, med adherence, routine on-time rate, all compared with the week before.
+- How fast you got up, how often the still-up check caught you, your slowest step, hushes and emergency stops, routine on-time rate, all compared with the week before.
 
 **Tamper log** (Settings)
 - Every blocked settings screen, wrong code, protection change, hush, step swap, force-stop and uninstall-lock attempt, with the time.
@@ -53,10 +49,8 @@ Personal use, sideloaded. Not for the Play Store (it uses device admin and an ac
 2. Open Settings in the app and work through the checklist. Each "Fix" button opens the right system page.
    - On OnePlus also go to app info → Battery → **Unrestricted**, and allow auto-launch if it's offered.
 3. Add tags (Settings → Tags): tap each NFC card, or scan a barcode. Name them by where they'll live.
-4. Add meds, and give the morning one a bottle tag (scan the pharmacy label barcode, or stick an NFC sticker on it).
-5. Add an alarm with steps. Use **Test now** to try it.
-6. Make the emergency code, write it down, put it somewhere you have to get up to reach. Turn **Protection on**.
-7. Optional: on your home Wi-Fi, Settings → Home Wi-Fi → **I'm home: save this Wi-Fi**. Add the widget from your home screen's widget list.
+4. Add an alarm with steps. Use **Test now** to try it.
+5. Make the emergency code, write it down, put it somewhere you have to get up to reach. Turn **Protection on**.
 
 ## Install the watch app
 
@@ -77,7 +71,7 @@ The watch and phone apps must come from the same build (same signing key), or th
 Needs JDK 17 and the Android SDK (compileSdk 37).
 
 ```
-./gradlew testDebugUnitTest     # unit tests for the alarm, session and med logic (Logic.kt)
+./gradlew testDebugUnitTest     # unit tests for the alarm and session logic (Logic.kt)
 ./gradlew assembleRelease       # app/build/outputs/apk/release/app-release.apk and wear/build/outputs/apk/release/wear-release.apk
 ```
 
@@ -86,11 +80,11 @@ If you build from WSL, copy the project onto the Linux filesystem first; Gradle 
 
 ## Code map
 
-- `Model.kt`: data (alarms, steps, tags, meds, doses, wake-up session, settings).
-- `Logic.kt`: all the rules, pure and unit-tested (next alarm time, session steps, still-up, dose states, reminders, streaks, refill, CSV).
+- `Model.kt`: data (alarms, steps, tags, wake-up session, settings).
+- `Logic.kt`: all the rules, pure and unit-tested (next alarm time, session steps, still-up, routine, streaks, weekly report, CSV).
 - `Store.kt`: one JSON file in device-protected storage, so the alarm works before first unlock after a reboot.
 - `Scheduler.kt`, `Receivers.kt`: Android alarms, boot handling, reminder buttons.
 - `RingService.kt`: sound, vibration, volume. `RingActivity.kt`: the ringing screen and steps.
 - `GuardService.kt`: the settings guard. `ui/`: the app screens.
-- `HomeNet.kt`: home Wi-Fi recognition. `MedWidget.kt`: the widget. `WatchLink.kt`: sends alarm state to the watch.
+- `WatchLink.kt`: sends alarm state to the watch.
 - `wear/`: the watch app (sync with the phone, backup alarm, buzzing).

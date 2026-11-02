@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -32,14 +31,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.blakeriding.upright.ui.AlarmsScreen
 import com.blakeriding.upright.ui.HistoryScreen
-import com.blakeriding.upright.ui.MedsScreen
 import com.blakeriding.upright.ui.SettingsScreen
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 class MainActivity : ComponentActivity() {
     /** Card taps while the app is open, for registering NFC tags. */
     private val nfc = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    /** Tab requested by a notification or the widget. */
+    /** Tab requested by a notification. */
     private val requestedTab = mutableIntStateOf(-1)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,7 +47,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             UprightTheme {
                 val state by Store.state.collectAsStateWithLifecycle()
-                var tab by rememberSaveable { mutableIntStateOf(if (state.alarms.isEmpty() && !state.settings.protectionOn) 3 else 0) }
+                var tab by rememberSaveable { mutableIntStateOf(if (state.alarms.isEmpty() && !state.settings.protectionOn) 2 else 0) }
                 val asked = requestedTab.intValue
                 androidx.compose.runtime.LaunchedEffect(asked) {
                     if (asked >= 0) {
@@ -79,8 +77,7 @@ class MainActivity : ComponentActivity() {
                         Box(Modifier.weight(1f)) {
                             when (tab) {
                                 0 -> AlarmsScreen(state)
-                                1 -> MedsScreen(state, nfc)
-                                2 -> HistoryScreen(state)
+                                1 -> HistoryScreen(state)
                                 else -> SettingsScreen(state, nfc)
                             }
                         }
@@ -110,7 +107,6 @@ class MainActivity : ComponentActivity() {
 
         private val TABS = listOf(
             "Alarms" to Icons.Default.Notifications,
-            "Meds" to Icons.Default.Favorite,
             "History" to Icons.Default.DateRange,
             "Settings" to Icons.Default.Settings,
         )

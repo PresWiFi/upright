@@ -114,20 +114,25 @@ class LogicTest {
         assertTrue(s.steps.single() is Step.Type)
     }
 
-    @Test fun reRingSkipsMedsAlreadyDone() {
-        val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Med("m"), Step.Scan("t")))
-        val s = startSession(alarm, 0, false, rnd).copy(phase = Phase.PROMPT, medsDone = setOf("m"))
-        val r = s.reRing(alarm, rnd, 0)
+    @Test fun reRingStartsOverFromFirstStep() {
+        val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Lights(), Step.Scan("t")))
+        val r = startSession(alarm, 0, false, rnd).copy(phase = Phase.PROMPT, stepIndex = 1).reRing(alarm, rnd, 0)
         assertEquals(Phase.RINGING, r.phase)
-        assertEquals(listOf<Step>(Step.Scan("t")), r.steps)
+        assertEquals(alarm.steps, r.steps)
         assertEquals(1, r.rerings)
         assertEquals(0, r.stepIndex)
     }
 
-    @Test fun reRingWithOnlyMedsFallsBackToTyping() {
-        val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Med("m")))
-        val r = startSession(alarm, 0, false, rnd).copy(medsDone = setOf("m")).reRing(alarm, rnd, 0)
-        assertTrue(r.steps.single() is Step.Type)
+    @Test fun deletingATagShrinksScanSteps() {
+        val any = Step.ScanAny(listOf("a", "b", "c"))
+        assertTrue(any.usesTag("b"))
+        assertFalse(Step.Lights().usesTag("b"))
+        assertEquals(Step.ScanAny(listOf("a", "c")), any.withoutTag("b"))
+        assertEquals(Step.Scan("a"), Step.ScanAny(listOf("a", "b")).withoutTag("b"))
+        assertNull(Step.ScanAny(listOf("b")).withoutTag("b"))
+        assertNull(Step.Scan("b").withoutTag("b"))
+        assertEquals(Step.Scan("a"), Step.Scan("a").withoutTag("b"))
+        assertEquals("scan", any.kind)
     }
 
     @Test fun swapForTypingReplacesOnlyCurrent() {
@@ -165,143 +170,25 @@ class LogicTest {
         assertFalse(Settings().checkCode(code))
     }
 
-    // ---------- Meds ----------
-
-    private val med = Med("m", "Vitamin D", "1000 IU", times = listOf(8 * 60, 20 * 60), pillCount = 10.0, createdAt = ms(20, 0))
-
-    @Test fun slotStates() {
-        val slot = Slot("m", ms(28, 8))
-        assertEquals(SlotState.UPCOMING, slotState(slot, emptyList(), ms(28, 7)))
-        assertEquals(SlotState.DUE, slotState(slot, emptyList(), ms(28, 9)))
-        assertEquals(SlotState.MISSED, slotState(slot, emptyList(), ms(28, 14)))
-        assertEquals(SlotState.TAKEN, slotState(slot, listOf(DoseEvent("m", slot.at, ms(28, 8, 30), DoseStatus.TAKEN)), ms(28, 9)))
-        assertEquals(SlotState.LATE, slotState(slot, listOf(DoseEvent("m", slot.at, ms(28, 10), DoseStatus.TAKEN)), ms(28, 11)))
-        assertEquals(SlotState.SKIPPED, slotState(slot, listOf(DoseEvent("m", slot.at, ms(28, 8), DoseStatus.SKIPPED)), ms(28, 9)))
-    }
-
-    @Test fun slotsRespectDaysAndCreation() {
-        val weekly = med.copy(days = setOf(3)) // Wednesday
-        assertEquals(2, weekly.slotsOn(LocalDate.of(2026, 10, 28), zone).size)
-        assertEquals(0, weekly.slotsOn(LocalDate.of(2026, 10, 29), zone).size)
-        val newMed = med.copy(createdAt = ms(28, 12))
-        assertEquals(listOf(ms(28, 20)), newMed.slotsOn(LocalDate.of(2026, 10, 28), zone).map { it.at })
-        assertEquals(0, med.copy(active = false).slotsOn(LocalDate.of(2026, 10, 28), zone).size)
-    }
-
-    @Test fun logDoseAdjustsPillsAndUndoRefunds() {
-        val slot = Slot("m", ms(28, 8))
-        var st = AppState(meds = listOf(med), snoozes = mapOf(slot.key to 1L))
-        st = st.logDose(slot, DoseStatus.TAKEN, ms(28, 8, 5))
-        assertEquals(9.0, st.meds[0].pillCount!!, 0.0)
-        assertTrue(st.snoozes.isEmpty())
-        // Re-logging the same slot as taken doesn't double count.
-        st = st.logDose(slot, DoseStatus.TAKEN, ms(28, 8, 6))
-        assertEquals(9.0, st.meds[0].pillCount!!, 0.0)
-        assertEquals(1, st.doses.size)
-        // Switching to skipped gives the pill back.
-        st = st.logDose(slot, DoseStatus.SKIPPED, ms(28, 8, 7))
-        assertEquals(10.0, st.meds[0].pillCount!!, 0.0)
-        st = st.logDose(slot, DoseStatus.TAKEN, ms(28, 8, 8)).undoDose(slot)
-        assertEquals(10.0, st.meds[0].pillCount!!, 0.0)
-        assertTrue(st.doses.isEmpty())
-    }
-
-    @Test fun pillCountNeverNegative() {
-        val st = AppState(meds = listOf(med.copy(pillCount = 0.5))).logDose(Slot("m", 1), DoseStatus.TAKEN, 1)
-        assertEquals(0.0, st.meds[0].pillCount!!, 0.0)
-    }
-
-    @Test fun refillMath() {
-        // 2 a day, 10 left -> 5 days, warn at 7.
-        assertEquals(5.0, med.daysLeft()!!, 0.001)
-        assertTrue(med.needsRefill())
-        assertFalse(med.copy(pillCount = 30.0).needsRefill())
-        assertNull(med.copy(pillCount = null).daysLeft())
-        // Weekly: 1 per week, 2 left -> 14 days.
-        assertEquals(14.0, med.copy(times = listOf(480), days = setOf(1), pillCount = 2.0).daysLeft()!!, 0.001)
-    }
-
-    @Test fun remindersUpcomingNagAndSnooze() {
-        val meds = listOf(med)
-        // Before 8:00: next reminder is the 8:00 dose.
-        assertEquals(ms(28, 8), nextReminderAt(meds, emptyList(), emptyMap(), ms(28, 7), zone, 10))
-        // 8:05 and not logged: nag 10 minutes later.
-        assertEquals(ms(28, 8, 15), nextReminderAt(meds, emptyList(), emptyMap(), ms(28, 8, 5), zone, 10))
-        assertEquals(listOf(Slot("m", ms(28, 8))), alertSlots(meds, emptyList(), emptyMap(), ms(28, 8, 5), zone))
-        // Snoozed until 8:20: no alert now, reminder at 8:20.
-        val snooze = mapOf(Slot("m", ms(28, 8)).key to ms(28, 8, 20))
-        assertTrue(alertSlots(meds, emptyList(), snooze, ms(28, 8, 5), zone).isEmpty())
-        assertEquals(ms(28, 8, 20), nextReminderAt(meds, emptyList(), snooze, ms(28, 8, 5), zone, 10))
-        // Logged: next is the 20:00 dose.
-        val taken = listOf(DoseEvent("m", ms(28, 8), ms(28, 8, 5), DoseStatus.TAKEN))
-        assertEquals(ms(28, 20), nextReminderAt(meds, taken, emptyMap(), ms(28, 8, 6), zone, 10))
-        // Past the 3h nag limit: quiet until the next dose.
-        assertTrue(alertSlots(meds, emptyList(), emptyMap(), ms(28, 11, 30), zone).isEmpty())
-        assertEquals(ms(28, 20), nextReminderAt(meds, emptyList(), emptyMap(), ms(28, 11, 30), zone, 10))
-    }
-
-    @Test fun nagNeverOvershootsLimit() {
-        // At 10:55 a 10-min nag would land past the 11:00 limit; it should stop at the limit.
-        assertEquals(ms(28, 11), nextReminderAt(listOf(med), emptyList(), emptyMap(), ms(28, 10, 55), zone, 10))
-    }
-
-    @Test fun lateNightDoseStillDueAfterMidnight() {
-        val night = med.copy(times = listOf(23 * 60))
-        assertEquals(listOf(Slot("m", ms(28, 23))), dueSlots(listOf(night), emptyList(), ms(29, 0, 30), zone))
-    }
-
-    @Test fun nearestOpenSlotForMorningStep() {
-        assertEquals(Slot("m", ms(28, 8)), nearestOpenSlot(med, emptyList(), ms(28, 7), zone))
-        val taken = listOf(DoseEvent("m", ms(28, 8), ms(28, 8), DoseStatus.TAKEN))
-        assertEquals(Slot("m", ms(28, 20)), nearestOpenSlot(med, taken, ms(28, 9), zone))
-        // Not scheduled today at all: log as an extra dose at "now".
-        assertEquals(Slot("m", ms(29, 7)), nearestOpenSlot(med.copy(days = setOf(3)), emptyList(), ms(29, 7), zone))
-    }
-
-    @Test fun medStreakCountsFullDays() {
-        val m = med.copy(times = listOf(8 * 60), createdAt = ms(25, 0))
-        fun took(day: Int) = DoseEvent("m", ms(day, 8), ms(day, 8, 5), DoseStatus.TAKEN)
-        val doses = listOf(took(25), took(26), took(27))
-        // Today (28th) at 7:00, dose not due yet: doesn't break the streak.
-        assertEquals(3, medStreak(listOf(m), doses, ms(28, 7), zone))
-        // Today taken: counts.
-        assertEquals(4, medStreak(listOf(m), doses + took(28), ms(28, 9), zone))
-        // Today missed: breaks.
-        assertEquals(0, medStreak(listOf(m), doses, ms(28, 15), zone))
-        // A gap breaks it.
-        assertEquals(1, medStreak(listOf(m), listOf(took(25), took(27)), ms(28, 7), zone))
-        // Skipped breaks it too.
-        val skipped = DoseEvent("m", ms(26, 8), ms(26, 8), DoseStatus.SKIPPED)
-        assertEquals(1, medStreak(listOf(m), listOf(took(25), skipped, took(27)), ms(28, 7), zone))
-    }
-
     // ---------- Export + storage ----------
 
-    @Test fun exportIncludesMissedDosesAndWakes() {
-        val m = med.copy(times = listOf(8 * 60), createdAt = ms(27, 0), name = "Vit, D")
+    @Test fun exportListsWakes() {
         val st = AppState(
-            meds = listOf(m),
-            doses = listOf(DoseEvent("m", ms(28, 8), ms(28, 8, 10), DoseStatus.TAKEN)),
-            wakes = listOf(WakeEvent("a", ms(28, 7), ms(28, 7, 4), 1, WakeOutcome.DONE)),
-            alarms = listOf(Alarm("a", 7 * 60, label = "Work")),
+            wakes = listOf(WakeEvent("a", ms(28, 7), ms(28, 7, 4), 1, WakeOutcome.DONE), WakeEvent("a", ms(27, 7), ms(27, 7, 2), 0, WakeOutcome.DONE)),
+            alarms = listOf(Alarm("a", 7 * 60, label = "Work, early")),
         )
         val lines = exportCsv(st, ms(28, 12), zone).trim().lines()
         assertEquals("kind,date,scheduled,logged,item,status,note", lines[0])
-        assertEquals("dose,2026-10-27,08:00,,\"Vit, D 1000 IU\",missed,", lines[1])
-        assertEquals("wake,2026-10-28,07:00,07:04,Work,done (re-rang 1x),", lines[2])
-        assertEquals("dose,2026-10-28,08:00,08:10,\"Vit, D 1000 IU\",taken,", lines[3])
+        assertEquals("wake,2026-10-27,07:00,07:02,\"Work, early\",done,", lines[1])
+        assertEquals("wake,2026-10-28,07:00,07:04,\"Work, early\",done (re-rang 1x),", lines[2])
     }
 
     @Test fun stateRoundTripsThroughJson() {
         val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         val st = AppState(
-            alarms = listOf(Alarm("a", 420, steps = listOf(Step.Scan("t"), Step.Lights(20), Step.Med("m"), Step.Type("ABC")))),
-            tags = listOf(Tag("t", "Bathroom", TagKind.NFC, "04AB")),
-            meds = listOf(med),
-            session = Session("a", 1, listOf(Step.Lights()), medsDone = setOf("m")),
-            snoozes = mapOf("m@1" to 2L),
-            homeSnoozes = setOf("m@1"),
-            homeNet = HomeNet("192.168.1.1", "192.168.1.0/24", listOf("192.168.1.1"), "lan", "2601:0a:1b"),
+            alarms = listOf(Alarm("a", 420, steps = listOf(Step.Scan("t"), Step.ScanAny(listOf("t", "u")), Step.Lights(20), Step.Type("ABC")))),
+            tags = listOf(Tag("t", "Bathroom", TagKind.NFC, "04AB"), Tag("u", "Kitchen", TagKind.BARCODE, "XYZ")),
+            session = Session("a", 1, listOf(Step.Lights())),
             armed = Armed("a", 3),
             routine = listOf(RoutineItem("r", "Shower", 10)),
             routineRun = RoutineRun(1, listOf(RoutineItem("r", "Shower", 10))),
@@ -312,7 +199,21 @@ class LogicTest {
         assertNotNull(json.decodeFromString(AppState.serializer(), """{"future":1}"""))
     }
 
-    // ---------- v0.2: step timing, hush, routine, home snooze, tamper, weekly report ----------
+    @Test fun oldMedDataLoadsWithoutMedSteps() {
+        val old = """{
+            "alarms": [{"id": "a", "minuteOfDay": 420, "steps": [{"type": "med", "medId": "m"}, {"type": "scan", "tagId": "t"}]}],
+            "meds": [{"id": "m", "name": "Vitamin D"}],
+            "doses": [], "snoozes": {"m@1": 2}, "homeSnoozes": [], "homeNet": null,
+            "session": {"alarmId": "a", "firedAt": 1, "steps": [{"type": "scan", "tagId": "t"}, {"type": "med", "medId": "m"}], "stepIndex": 1, "medsDone": ["m"]}
+        }"""
+        val st = Store.decode(old)
+        assertEquals(listOf<Step>(Step.Scan("t")), st.alarms.single().steps)
+        val steps = st.session!!.steps
+        assertEquals(Step.Scan("t"), steps[0])
+        assertTrue(steps[1] is Step.Type) // keeps the in-progress step count the same
+    }
+
+    // ---------- v0.2: step timing, hush, routine, tamper, weekly report ----------
 
     @Test fun stepTimesAndUpAtAreRecorded() {
         val alarm = Alarm("a", 7 * 60, steps = listOf(Step.Scan("t"), Step.Lights()))
@@ -361,27 +262,6 @@ class LogicTest {
         assertNull(startRoutine(emptyList(), 0, false))
     }
 
-    @Test fun homeSnoozeEndsOnArrivalAndRestartsNag() {
-        val meds = listOf(med)
-        val slot = Slot("m", ms(28, 8))
-        var st = AppState(meds = meds).snoozeUntilHome(slot, ms(28, 8, 5))
-        assertEquals(ms(28, 12, 5), st.snoozes[slot.key]) // fallback 4h later
-        assertTrue(alertSlots(meds, emptyList(), st.snoozes, ms(28, 11), zone).isEmpty())
-        st = st.arriveHome(ms(28, 11))
-        assertTrue(st.homeSnoozes.isEmpty())
-        // Past the usual 3h nag limit from 8:00, but the nag clock restarted at arrival.
-        assertEquals(listOf(slot), alertSlots(meds, emptyList(), st.snoozes, ms(28, 11, 1), zone))
-        assertEquals(ms(28, 11, 11), nextReminderAt(meds, emptyList(), st.snoozes, ms(28, 11, 1), zone, 10))
-        // Logging the dose clears it.
-        assertTrue(st.snoozeUntilHome(slot, 0).logDose(slot, DoseStatus.TAKEN, ms(28, 11)).homeSnoozes.isEmpty())
-    }
-
-    @Test fun homeSnoozeFallbackBeforeMissed() {
-        val slot = Slot("m", ms(28, 8))
-        val st = AppState(meds = listOf(med)).snoozeUntilHome(slot, ms(28, 12))
-        assertEquals(ms(28, 13, 45), st.snoozes[slot.key])
-    }
-
     @Test fun tamperLogIsCapped() {
         var st = AppState()
         repeat(310) { st = st.logTamper(TamperKind.BLOCKED_SCREEN, it.toLong()) }
@@ -400,10 +280,8 @@ class LogicTest {
             WakeEvent("a", ms(28, 7), ms(28, 7, 1), 0, WakeOutcome.EMERGENCY, test = true),
             WakeEvent("a", ms(20, 7), ms(20, 7, 20), 0, WakeOutcome.DONE, upAt = ms(20, 7, 10)),
         )
-        val m = med.copy(times = listOf(8 * 60))
-        val doses = listOf(DoseEvent("m", ms(26, 8), ms(26, 8), DoseStatus.TAKEN), DoseEvent("m", ms(27, 8), ms(27, 8), DoseStatus.SKIPPED))
         val st = AppState(
-            meds = listOf(m), doses = doses, wakes = wakes,
+            wakes = wakes,
             routineLogs = listOf(RoutineLog(ms(26, 7, 5), ms(26, 7, 30), listOf(RoutineResult("Shower", 10, 9 * MINUTE_MS), RoutineResult("Dress", 5, 8 * MINUTE_MS)))),
             tamper = listOf(TamperEvent(ms(27, 7, 2), TamperKind.BLOCKED_SCREEN), TamperEvent(ms(27, 7, 3), TamperKind.HUSH)),
         )
@@ -415,8 +293,6 @@ class LogicTest {
         assertEquals(1, w.cleanWakes)
         assertEquals(1, w.hushes)
         assertEquals("scan" to 180_000L, w.slowestStep)
-        assertEquals(1, w.medTaken)
-        assertEquals(2, w.medTotal) // 26 taken, 27 skipped; 28 is still due at noon, so not counted yet
         assertEquals(1, w.routineOnTime)
         assertEquals(2, w.routineItems)
         assertEquals(1, w.attempts)

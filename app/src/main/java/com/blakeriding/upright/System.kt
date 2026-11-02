@@ -38,20 +38,16 @@ class App : Application() {
         super.onCreate()
         Store.init(this)
         Notifs.createChannels(this)
-        // Any change to alarms, meds or the wake-up session re-plans what Android should wake us for.
+        // Any change to alarms or the wake-up session re-plans what Android should wake us for.
         scope.launch {
             Store.state
-                .map { listOf(it.alarms, it.meds, it.doses, it.snoozes, it.session, it.settings, it.routineRun) }
+                .map { listOf(it.alarms, it.session, it.settings, it.routineRun) }
                 .distinctUntilChanged()
                 .collect { Scheduler.rescheduleAll(this@App) }
         }
         // Keep the watch in step with the alarm.
         scope.launch {
             Store.state.map { WatchLink.snapshot(it) }.distinctUntilChanged().collect { WatchLink.push(this@App, it) }
-        }
-        // Keep the home-screen widget current.
-        scope.launch {
-            Store.state.map { listOf(it.meds, it.doses, it.armed) }.distinctUntilChanged().collect { MedWidget.refresh(this@App) }
         }
         scope.launch(Dispatchers.Default) { checkExits(this@App) }
     }

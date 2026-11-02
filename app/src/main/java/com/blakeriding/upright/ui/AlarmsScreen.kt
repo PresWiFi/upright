@@ -20,8 +20,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -133,8 +135,9 @@ private fun NextAlarmHeader(state: AppState) {
 
 fun stepName(step: Step, state: AppState): String = when (step) {
     is Step.Scan -> "Scan " + (state.tags.find { it.id == step.tagId }?.name ?: "(deleted tag)")
+    is Step.ScanAny -> state.tags.filter { it.id in step.tagIds }.map { it.name }
+        .let { if (it.isEmpty()) "Scan (deleted tags)" else "Scan one of: " + it.joinToString(", ") }
     is Step.Lights -> "Lights on ${step.seconds}s"
-    is Step.Med -> "Take " + (state.meds.find { it.id == step.medId }?.name ?: "(deleted med)")
     is Step.Type -> "Type a code"
 }
 
@@ -149,6 +152,8 @@ private fun AlarmEditor(original: Alarm, state: AppState, onClose: () -> Unit) {
     var alarm by remember { mutableStateOf(original) }
     var pickTime by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
+    /** Open "scan one of these" picker: the step index being edited (null = adding a new one) and its tags. */
+    var picking by remember { mutableStateOf<Pair<Int?, Set<String>>?>(null) }
     var needCode by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun save() {
@@ -185,7 +190,11 @@ private fun AlarmEditor(original: Alarm, state: AppState, onClose: () -> Unit) {
                 if (alarm.steps.isEmpty()) Text("No steps yet. Without any, you'll have to type a random code.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 alarm.steps.forEachIndexed { i, step ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${i + 1}. ${stepName(step, state)}", Modifier.weight(1f))
+                        val editable = step is Step.ScanAny
+                        Text(
+                            "${i + 1}. ${stepName(step, state)}",
+                            Modifier.weight(1f).then(if (editable) Modifier.clickable { picking = i to (step as Step.ScanAny).tagIds.toSet() } else Modifier),
+                        )
                         IconButton(onClick = { alarm = alarm.copy(steps = alarm.steps.move(i, -1)) }, enabled = i > 0) { Icon(Icons.Default.KeyboardArrowUp, "Up") }
                         IconButton(onClick = { alarm = alarm.copy(steps = alarm.steps.move(i, 1)) }, enabled = i < alarm.steps.lastIndex) { Icon(Icons.Default.KeyboardArrowDown, "Down") }
                         IconButton(onClick = { alarm = alarm.copy(steps = alarm.steps.filterIndexed { j, _ -> j != i }) }) { Icon(Icons.Default.Close, "Remove") }
@@ -197,11 +206,11 @@ private fun AlarmEditor(original: Alarm, state: AppState, onClose: () -> Unit) {
                         state.tags.forEach { tag ->
                             DropdownMenuItem(text = { Text("Scan ${tag.name}") }, onClick = { alarm = alarm.copy(steps = alarm.steps + Step.Scan(tag.id)); addMenu = false })
                         }
+                        if (state.tags.size >= 2) {
+                            DropdownMenuItem(text = { Text("Scan one of these tags…") }, onClick = { picking = null to emptySet(); addMenu = false })
+                        }
                         if (hasLightSensor(ctx)) {
                             DropdownMenuItem(text = { Text("Lights on for 30 seconds") }, onClick = { alarm = alarm.copy(steps = alarm.steps + Step.Lights()); addMenu = false })
-                        }
-                        state.meds.filter { m -> alarm.steps.none { it is Step.Med && it.medId == m.id } }.forEach { med ->
-                            DropdownMenuItem(text = { Text("Take ${med.name}") }, onClick = { alarm = alarm.copy(steps = alarm.steps + Step.Med(med.id)); addMenu = false })
                         }
                         if (state.tags.isEmpty()) DropdownMenuItem(text = { Text("Add NFC cards or barcodes in Settings → Tags") }, onClick = { addMenu = false }, enabled = false)
                     }
@@ -234,11 +243,46 @@ private fun AlarmEditor(original: Alarm, state: AppState, onClose: () -> Unit) {
             }
         }
     }
+    picking?.let { (index, initial) ->
+        TagPickerDialog(state, initial, onDismiss = { picking = null }) { ids ->
+            // A single pick is just a normal scan step.
+            val step = if (ids.size == 1) Step.Scan(ids.first()) else Step.ScanAny(state.tags.map { it.id }.filter { it in ids })
+            alarm = alarm.copy(steps = if (index == null) alarm.steps + step else alarm.steps.toMutableList().also { it[index] = step })
+            picking = null
+        }
+    }
     if (pickTime) TimePickerDialog(alarm.minuteOfDay, onDismiss = { pickTime = false }) { alarm = alarm.copy(minuteOfDay = it); pickTime = false }
     needCode?.let { action ->
         CodeDialog(state.settings, "This alarm is coming up soon. Enter your emergency code to change it.",
             onDismiss = { needCode = null }, onOk = { needCode = null; action() })
     }
+}
+
+/** Tick the tags that can each stop this step. */
+@Composable
+private fun TagPickerDialog(state: AppState, initial: Set<String>, onDismiss: () -> Unit, onDone: (Set<String>) -> Unit) {
+    var picked by remember { mutableStateOf(initial.filter { id -> state.tags.any { it.id == id } }.toSet()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Scan one of these") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Any one of the ticked tags stops this step.", style = MaterialTheme.typography.bodySmall)
+                state.tags.forEach { tag ->
+                    val on = tag.id in picked
+                    Row(
+                        Modifier.fillMaxWidth().clickable { picked = if (on) picked - tag.id else picked + tag.id },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(on, onCheckedChange = { picked = if (on) picked - tag.id else picked + tag.id })
+                        Text(tag.name)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onDone(picked) }, enabled = picked.isNotEmpty()) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 private fun <T> List<T>.move(i: Int, by: Int): List<T> {

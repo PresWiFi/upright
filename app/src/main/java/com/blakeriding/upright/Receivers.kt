@@ -96,7 +96,6 @@ class AlarmReceiver : BroadcastReceiver() {
                 Scheduler.scheduleAlarm(context)
             }
             Scheduler.ACTION_PROMPT, Scheduler.ACTION_DEADLINE -> Wake.advanceTimers(context)
-            Scheduler.ACTION_MEDS -> Notifs.postMedAlerts(context)
             Scheduler.ACTION_IM_UP -> Wake.confirmUp(context)
             Scheduler.ACTION_ROUTINE -> Routine.nudge(context)
             Scheduler.ACTION_REPORT -> Notifs.postWeeklyReport(context)
@@ -113,41 +112,7 @@ class BootReceiver : BroadcastReceiver() {
         if (session?.phase == Phase.RINGING) RingService.start(context) else if (session != null) Wake.advanceTimers(context)
         // Also rings now for an alarm that was due while the phone was off (see Scheduler.scheduleAlarm).
         Scheduler.rescheduleAll(context)
-        Notifs.postMedAlerts(context)
         if (Store.state.value.routineRun != null) Notifs.postRoutine(context, alert = false)
-        HomeWifi.sync(context)
-    }
-}
-
-/** Taken / Snooze / Skip buttons on med reminders. */
-class MedActionReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        Store.init(context)
-        val medId = intent.getStringExtra(EXTRA_MED) ?: return
-        val slot = Slot(medId, intent.getLongExtra(EXTRA_AT, 0))
-        val now = nowMs()
-        when (intent.action) {
-            ACTION_TAKEN -> {
-                Store.update { it.logDose(slot, DoseStatus.TAKEN, now) }
-                Notifs.maybeRefillWarning(context, medId)
-            }
-            ACTION_SKIP -> Store.update { it.logDose(slot, DoseStatus.SKIPPED, now, "Skipped from reminder") }
-            ACTION_SNOOZE -> Store.update { it.copy(snoozes = it.snoozes + (slot.key to now + SNOOZE_MS)) }
-            ACTION_HOME -> Store.update { it.snoozeUntilHome(slot, now) }
-        }
-        Notifs.cancelMed(context, slot)
-        Scheduler.scheduleMeds(context)
-        HomeWifi.sync(context)
-    }
-
-    companion object {
-        const val ACTION_TAKEN = "com.blakeriding.upright.TAKEN"
-        const val ACTION_SKIP = "com.blakeriding.upright.SKIP"
-        const val ACTION_SNOOZE = "com.blakeriding.upright.SNOOZE"
-        const val ACTION_HOME = "com.blakeriding.upright.SNOOZE_HOME"
-        const val EXTRA_MED = "med"
-        const val EXTRA_AT = "at"
-        const val SNOOZE_MS = 15 * MINUTE_MS
     }
 }
 

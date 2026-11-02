@@ -53,7 +53,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.blakeriding.upright.AppState
-import com.blakeriding.upright.HomeWifi
 import com.blakeriding.upright.TamperEvent
 import com.blakeriding.upright.TamperKind
 import com.blakeriding.upright.WatchLink
@@ -74,6 +73,8 @@ import com.blakeriding.upright.guardActive
 import com.blakeriding.upright.hasDndAccess
 import com.blakeriding.upright.hasLightSensor
 import com.blakeriding.upright.hasNfc
+import com.blakeriding.upright.usesTag
+import com.blakeriding.upright.withoutTag
 import com.blakeriding.upright.hashEmergencyCode
 import com.blakeriding.upright.ignoresBatteryOptimizations
 import com.blakeriding.upright.isAccessibilityEnabled
@@ -113,7 +114,7 @@ fun SettingsScreen(state: AppState, nfc: SharedFlow<String>) {
 
         @Suppress("UNUSED_EXPRESSION") tick // read so the checks below recompose on resume
         SectionTitle("Setup")
-        Check("Notifications", canNotify(ctx), "Needed for the alarm screen and med reminders") {
+        Check("Notifications", canNotify(ctx), "Needed for the alarm screen and reminders") {
             if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         Check("Full-screen alarm", canFullScreen(ctx), "Lets the alarm take over the lock screen") {
@@ -173,13 +174,12 @@ fun SettingsScreen(state: AppState, nfc: SharedFlow<String>) {
                 Text("${tag.name}  ", Modifier.weight(1f))
                 Text(if (tag.kind == TagKind.NFC) "NFC" else "Barcode", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 IconButton(onClick = {
-                    val lockedUse = state.alarms.any { a -> alarmLocked(state, a, nowZ()) && a.steps.any { it is Step.Scan && it.tagId == tag.id } }
+                    val lockedUse = state.alarms.any { a -> alarmLocked(state, a, nowZ()) && a.steps.any { it.usesTag(tag.id) } }
                     val remove: () -> Unit = {
                         Store.update { st ->
                             st.copy(
                                 tags = st.tags.filterNot { it.id == tag.id },
-                                alarms = st.alarms.map { a -> a.copy(steps = a.steps.filterNot { it is Step.Scan && it.tagId == tag.id }) },
-                                meds = st.meds.map { if (it.bottleTagId == tag.id) it.copy(bottleTagId = null) else it },
+                                alarms = st.alarms.map { a -> a.copy(steps = a.steps.mapNotNull { it.withoutTag(tag.id) }) },
                             )
                         }
                     }
@@ -205,13 +205,6 @@ fun SettingsScreen(state: AppState, nfc: SharedFlow<String>) {
             SectionTitle("Lights step")
             LuxCalibration(s.lightsLux) { v -> update { it.copy(lightsLux = v) } }
         }
-
-        SectionTitle("Med reminders")
-        Text("Repeat every ${s.nagMin} min until answered (for up to 3 hours)")
-        Slider(s.nagMin.toFloat(), { v -> update { it.copy(nagMin = v.roundToInt()) } }, valueRange = 5f..30f, steps = 4)
-
-        SectionTitle("Home Wi-Fi")
-        HomeWifiSection(state, tick)
 
         SectionTitle("Galaxy Watch")
         WatchSection(tick)
@@ -342,37 +335,6 @@ fun AddTagDialog(nfc: SharedFlow<String>, defaultName: String, onClose: () -> Un
         confirmButton = {},
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )
-}
-
-@Composable
-private fun HomeWifiSection(state: AppState, tick: Int) {
-    val ctx = LocalContext.current
-    val home = state.homeNet
-    @Suppress("UNUSED_EXPRESSION") tick
-    val atHome = home != null && HomeWifi.atHome(ctx)
-    Text(
-        when {
-            home == null -> "Save your home Wi-Fi to get an \"At home\" option on med reminders: it reminds you again as soon as you get home."
-            atHome -> "Saved. You're on it now."
-            else -> "Saved. You're not on it right now."
-        },
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Text(
-        "Recognised by your router's network details, not the Wi-Fi name, so Upright doesn't need location access. " +
-            "If home isn't detected, the reminder comes back after a few hours anyway.",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Row {
-        OutlinedButton(onClick = {
-            val now = HomeWifi.current(ctx)
-            if (now == null) ctx.toast("Connect to your home Wi-Fi first") else {
-                Store.update { it.copy(homeNet = now) }
-                ctx.toast("Saved as home")
-            }
-        }) { Text(if (home == null) "I'm home: save this Wi-Fi" else "Re-save (I'm home now)") }
-        if (home != null) TextButton(onClick = { Store.update { it.copy(homeNet = null, homeSnoozes = emptySet()) } }) { Text("Forget") }
-    }
 }
 
 @Composable

@@ -2,7 +2,6 @@ package com.blakeriding.upright.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,14 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blakeriding.upright.AppState
-import com.blakeriding.upright.SlotState
 import com.blakeriding.upright.WakeOutcome
-import com.blakeriding.upright.allSlotsOn
 import com.blakeriding.upright.dateOf
 import com.blakeriding.upright.exportCsv
-import com.blakeriding.upright.medStreak
 import com.blakeriding.upright.nowMs
-import com.blakeriding.upright.slotState
 import com.blakeriding.upright.toast
 import com.blakeriding.upright.reportLines
 import com.blakeriding.upright.wakeStreak
@@ -56,12 +51,7 @@ fun HistoryScreen(state: AppState) {
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item { Text("History", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 16.dp)) }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StreakCard("Mornings in a row", wakeStreak(state.wakes), Modifier.weight(1f))
-                StreakCard("Days all meds taken", medStreak(state.meds, state.doses, now, zone()), Modifier.weight(1f))
-            }
-        }
+        item { StreakCard("Mornings in a row", wakeStreak(state.wakes), Modifier.fillMaxWidth()) }
         item {
             val start = weekStart(today)
             val thisWeek = weekStats(state, start, now, zone())
@@ -72,7 +62,7 @@ fun HistoryScreen(state: AppState) {
                     reportLines(thisWeek, lastWeek).forEach { Text("• $it", Modifier.padding(vertical = 2.dp)) }
                 }
             }
-            if (lastWeek.wakes > 0 || lastWeek.medTotal > 0) {
+            if (lastWeek.wakes > 0) {
                 SectionTitle("Last week")
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
@@ -84,7 +74,7 @@ fun HistoryScreen(state: AppState) {
             }
         }
         item { SectionTitle("Last 30 days") }
-        items(days, key = { it.toEpochDay() }) { day -> DayRow(day, state, now) }
+        items(days, key = { it.toEpochDay() }) { day -> DayRow(day, state) }
         item {
             OutlinedButton(onClick = { export.launch("upright-${today}.csv") }, modifier = Modifier.padding(vertical = 24.dp)) { Text("Export CSV") }
         }
@@ -104,12 +94,9 @@ private fun StreakCard(label: String, value: Int, modifier: Modifier) {
 private val dayFmt = DateTimeFormatter.ofPattern("EEE MMM d")
 
 @Composable
-private fun DayRow(day: LocalDate, state: AppState, now: Long) {
+private fun DayRow(day: LocalDate, state: AppState) {
     val wakes = state.wakes.filter { !it.test && dateOf(it.firedAt, zone()) == day }
-    val slots = allSlotsOn(state.meds, day, zone()).map { slotState(it, state.doses, now) }
-    val taken = slots.count { it == SlotState.TAKEN || it == SlotState.LATE }
-    val bad = slots.count { it == SlotState.MISSED || it == SlotState.SKIPPED }
-    if (wakes.isEmpty() && slots.isEmpty()) return
+    if (wakes.isEmpty()) return
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(day.format(dayFmt), Modifier.weight(1f))
         Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
@@ -119,16 +106,6 @@ private fun DayRow(day: LocalDate, state: AppState, now: Long) {
                     WakeOutcome.EMERGENCY -> "Emergency stop"
                 }
                 Text(text, color = if (w.outcome == WakeOutcome.DONE && w.rerings == 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
-            }
-            if (slots.isNotEmpty()) {
-                Text(
-                    "Meds $taken/${slots.size}" + if (bad > 0) " · $bad missed/skipped" else "",
-                    color = when {
-                        bad > 0 -> MaterialTheme.colorScheme.error
-                        taken == slots.size -> MaterialTheme.colorScheme.tertiary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
             }
         }
     }

@@ -158,14 +158,14 @@ private fun StepView(step: Step, state: AppState, nfc: SharedFlow<String>, onUnl
     when (step) {
         is Step.Scan -> {
             val tag = state.tags.find { it.id == step.tagId }
-            if (tag == null) MissingView("The tag for this step was deleted.") else ScanView(tag, "Scan ${tag.name}", nfc, onUnlock, done)
+            if (tag == null) MissingView("The tag for this step was deleted.") else ScanView(listOf(tag), nfc, onUnlock, done)
+        }
+        is Step.ScanAny -> {
+            val tags = state.tags.filter { it.id in step.tagIds }
+            if (tags.isEmpty()) MissingView("The tags for this step were deleted.") else ScanView(tags, nfc, onUnlock, done)
         }
         is Step.Lights -> if (hasLightSensor(ctx)) LightsView(step.seconds, state.settings.lightsLux, done) else MissingView("This phone has no light sensor.")
         is Step.Type -> TypeView(step.phrase, done)
-        is Step.Med -> {
-            val med = state.meds.find { it.id == step.medId }
-            if (med == null) MissingView("This med was deleted.") else MedView(med, state, nfc, onUnlock, done)
-        }
     }
 }
 
@@ -174,33 +174,43 @@ private fun MissingView(why: String) {
     Text("$why Tap \"Can't do this step\" below to type a code instead.", textAlign = TextAlign.Center)
 }
 
+/** Scan any one of [tags] (NFC cards and/or barcodes). */
 @Composable
-private fun ScanView(tag: Tag, title: String, nfc: SharedFlow<String>, onUnlock: () -> Unit, onMatch: () -> Unit) {
+private fun ScanView(tags: List<Tag>, nfc: SharedFlow<String>, onUnlock: () -> Unit, onMatch: () -> Unit) {
     val ctx = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
+    val cards = tags.filter { it.kind == TagKind.NFC }
+    val codes = tags.filter { it.kind == TagKind.BARCODE }
+    val one = tags.size == 1
     LaunchedEffect(Unit) { onUnlock() }
-    Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+    Text(if (one) "Scan ${tags[0].name}" else "Scan one of these", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+    if (!one) {
+        Spacer(Modifier.height(8.dp))
+        Text(tags.joinToString(", ") { it.name }, textAlign = TextAlign.Center)
+    }
     Spacer(Modifier.height(16.dp))
-    when (tag.kind) {
-        TagKind.NFC -> {
-            Text("Unlock your phone, then hold it to the ${tag.name} card.", textAlign = TextAlign.Center)
-            LaunchedEffect(tag) {
-                nfc.collect { uid ->
-                    working()
-                    if (uid == tag.value) onMatch() else error = "That's a different card."
-                }
+    if (cards.isNotEmpty()) {
+        Text(
+            if (cards.size == 1) "Unlock your phone, then hold it to the ${cards[0].name} card." else "Unlock your phone, then hold it to any of those cards.",
+            textAlign = TextAlign.Center,
+        )
+        LaunchedEffect(cards) {
+            nfc.collect { uid ->
+                working()
+                if (cards.any { it.value == uid }) onMatch() else error = "That card isn't one of these."
             }
         }
-        TagKind.BARCODE -> {
-            Button(onClick = {
-                working()
-                GmsBarcodeScanning.getClient(ctx).startScan()
-                    .addOnSuccessListener { code ->
-                        if (code.rawValue == tag.value) onMatch() else error = "That's a different code."
-                    }
-                    .addOnFailureListener { error = "Scanner error: ${it.message}" }
-            }, modifier = Modifier.fillMaxWidth().height(64.dp)) { Text("Open scanner") }
-        }
+    }
+    if (codes.isNotEmpty()) {
+        if (cards.isNotEmpty()) Spacer(Modifier.height(16.dp))
+        Button(onClick = {
+            working()
+            GmsBarcodeScanning.getClient(ctx).startScan()
+                .addOnSuccessListener { code ->
+                    if (codes.any { it.value == code.rawValue }) onMatch() else error = "That code isn't one of these."
+                }
+                .addOnFailureListener { error = "Scanner error: ${it.message}" }
+        }, modifier = Modifier.fillMaxWidth().height(64.dp)) { Text("Open scanner") }
     }
     error?.let {
         Spacer(Modifier.height(12.dp))
@@ -269,53 +279,6 @@ private fun TypeView(phrase: String, onDone: () -> Unit) {
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
     )
-}
-
-@Composable
-private fun MedView(med: Med, state: AppState, nfc: SharedFlow<String>, onUnlock: () -> Unit, onDone: () -> Unit) {
-    val ctx = LocalContext.current
-    val tag = med.bottleTagId?.let { id -> state.tags.find { it.id == id } }
-    var scanned by remember { mutableStateOf(tag == null) }
-    var skipping by remember { mutableStateOf(false) }
-    var reason by remember { mutableStateOf("") }
-    val name = if (med.dose.isBlank()) med.name else "${med.name} ${med.dose}"
-
-    if (!scanned) {
-        ScanView(tag!!, "Grab your ${med.name}", nfc, onUnlock) { scanned = true }
-        return
-    }
-    val slot = remember { nearestOpenSlot(med, state.doses, nowMs(), zone()) }
-    val already = state.doses.eventFor(slot) != null || med.slotsOn(dateOf(nowMs(), zone()), zone()).let { s -> s.isNotEmpty() && s.all { state.doses.eventFor(it) != null } }
-    fun finish(status: DoseStatus?) {
-        if (status != null) {
-            Store.update { it.logDose(slot, status, nowMs(), if (status == DoseStatus.SKIPPED) reason.trim() else "") }
-            if (status == DoseStatus.TAKEN) Notifs.maybeRefillWarning(ctx, med.id)
-            Notifs.cancelMed(ctx, slot)
-        }
-        Store.update { s -> s.copy(session = s.session?.copy(medsDone = s.session.medsDone + med.id)) }
-        onDone()
-    }
-
-    Text("Take $name", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-    Spacer(Modifier.height(24.dp))
-    when {
-        already -> {
-            Text("Already logged today.")
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { finish(null) }, Modifier.fillMaxWidth().height(56.dp)) { Text("Continue") }
-        }
-        skipping -> {
-            OutlinedTextField(reason, { reason = it; working() }, label = { Text("Why skip?") }, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { finish(DoseStatus.SKIPPED) }, enabled = reason.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Skip this dose") }
-            TextButton(onClick = { skipping = false }) { Text("Back") }
-        }
-        else -> {
-            Button(onClick = { finish(DoseStatus.TAKEN) }, Modifier.fillMaxWidth().height(64.dp)) { Text("Taken", fontSize = 20.sp) }
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = { skipping = true }, Modifier.fillMaxWidth()) { Text("Skip") }
-        }
-    }
 }
 
 /** Quick way to silence it for a bad moment: a short pause, a couple of times per alarm. */

@@ -54,8 +54,6 @@ fun daysSummary(days: Set<Int>): String = when (days) {
     else -> days.sorted().joinToString(" ") { DAY_NAMES[it - 1] }
 }
 
-fun fmtPills(n: Double): String = if (n % 1.0 == 0.0) n.toLong().toString() else "%.1f".format(n)
-
 @Composable
 fun DayPicker(days: Set<Int>, onChange: (Set<Int>) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

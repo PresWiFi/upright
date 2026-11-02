@@ -6,12 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 
-/** Tells Android when to wake us: the next alarm, the "still up?" timers, and med reminders. */
+/** Tells Android when to wake us: the next alarm, the "still up?" timers, routine nudges and the weekly report. */
 object Scheduler {
     const val ACTION_FIRE = "com.blakeriding.upright.FIRE"
     const val ACTION_PROMPT = "com.blakeriding.upright.PROMPT"
     const val ACTION_DEADLINE = "com.blakeriding.upright.DEADLINE"
-    const val ACTION_MEDS = "com.blakeriding.upright.MEDS"
     const val ACTION_IM_UP = "com.blakeriding.upright.IM_UP"
     const val ACTION_ROUTINE = "com.blakeriding.upright.ROUTINE"
     const val ACTION_REPORT = "com.blakeriding.upright.REPORT"
@@ -22,7 +21,6 @@ object Scheduler {
     fun rescheduleAll(context: Context) {
         scheduleAlarm(context)
         scheduleSession(context)
-        scheduleMeds(context)
         scheduleRoutine(context)
         scheduleReport(context)
     }
@@ -105,15 +103,5 @@ object Scheduler {
         if (epochAt(date, REPORT_MINUTE, now.zone) <= now.toInstant().toEpochMilli()) date = date.plusWeeks(1)
         context.getSystemService(AlarmManager::class.java)
             .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, epochAt(date, REPORT_MINUTE, now.zone), pi(context, ACTION_REPORT))
-    }
-
-    fun scheduleMeds(context: Context) {
-        val st = Store.state.value
-        val at = nextReminderAt(st.meds, st.doses, st.snoozes, nowMs(), zone(), st.settings.nagMin)
-        if (at == null) {
-            cancel(context, ACTION_MEDS)
-            return
-        }
-        exactQuiet(context, at, ACTION_MEDS)
     }
 }
