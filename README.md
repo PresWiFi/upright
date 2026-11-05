@@ -1,97 +1,91 @@
 # Upright
 
-An Android alarm that makes you get out of bed, and is hard to get rid of when you're half asleep.
+Android alarm that makes you get out of bed and is hard to dismiss half asleep.
 
-Personal use, sideloaded. Not for the Play Store (it uses device admin and an accessibility service on purpose).
+Personal use, sideloaded. Not Play Store compatible (uses device admin and accessibility).
 
-## What it does
+## Features
 
 **Alarm**
-- Rings loud and gets louder, ignores the volume keys, and rings through Do Not Disturb (if you grant DND access).
-- Survives reboots. If the phone was off at alarm time, it rings as soon as the phone turns back on (up to 6 hours late).
-- To stop it, you finish the steps you picked, in order:
-  - **Scan a tag**: tap an NFC card/sticker or scan a barcode/QR code. Put them far from bed.
-  - **Scan one of several tags**: any one of the tags you pick counts (handy with a tag in each room, or a spare card).
-  - **Lights on**: the light sensor has to read bright for 30 seconds.
-- **Still up?** 10 minutes after you finish, it asks "still up?". No answer within 60 seconds and it rings again.
-- **Can't do this step**: swaps the current step for typing a 24-character code (lost card, broken sensor...).
-- **Hush**: silences the alarm for 45 seconds, twice per alarm, for a bad moment. Each use is logged.
-- **Emergency**: the printed emergency code stops the alarm outright. It breaks your streak.
+- Escalating volume, ignores volume keys, rings through Do Not Disturb (with DND access).
+- Survives reboots. Rings on boot if it was missed while off (up to 6 h late).
+- Stop it by finishing your chosen steps in order:
+  - **Scan a tag:** NFC card/sticker or barcode/QR
+  - **Scan one of several tags:** any one of a set
+  - **Lights on:** light sensor reads bright for 30 s
+- **Still up?** 10 min later it asks; no answer in 60 s and it rings again.
+- **Can't do this step:** swap the step for typing a 24-character code.
+- **Hush:** 45 s silence, twice per alarm, logged.
+- **Emergency:** printed code stops it outright and breaks your streak.
 
-**Galaxy Watch** (Wear OS, Galaxy Watch 4 or newer)
-- Buzzes while the phone rings, pauses during a hush, and stops when you finish your steps.
-- Keeps its own copy of the next alarm. If the phone hasn't started ringing 90 seconds after alarm time (dead, off, out of range), the watch rings by itself. It can only be stopped from the watch (hold 3 seconds) when the phone can't be reached.
+**Galaxy Watch** (Wear OS, Watch 4+)
+- Buzzes with the phone, pauses on hush, stops when you finish.
+- Keeps its own copy of the next alarm and rings by itself if the phone hasn't started 90 s after alarm time. Stoppable on the watch (hold 3 s) only when the phone is unreachable.
 
 **Morning routine**
-- A checklist (shower, dress, out the door) that starts as soon as you finish the wake-up steps. Each item has a time budget.
-- An ongoing notification shows the current item with a countdown and Done / Skip buttons. Go over and it nudges you every 5 minutes.
-- Can be switched off per alarm.
+- Checklist with per-item time budgets, starting after the wake-up steps.
+- Ongoing notification with countdown and Done/Skip. Nudges every 5 min when over.
+- Can be turned off per alarm.
 
-**Hard to quit** (Settings → Protection)
-- Uninstall lock (device admin): Android won't uninstall the app.
-- Settings guard (accessibility): from 2 hours before an alarm until you're up, it backs out of any settings screen that mentions Upright (app info, uninstall, force stop, admin, accessibility). While ringing, it also brings the alarm screen back if you leave it.
-- Changing, turning off or deleting an alarm within those 2 hours needs the emergency code.
-- Outside alarm hours everything is unlocked, so daytime you can still change things.
+**Protection** (Settings → Protection)
+- Uninstall lock (device admin).
+- Settings guard (accessibility): from 2 h before an alarm until you're up, backs out of any settings screen mentioning Upright. While ringing, brings the alarm screen back.
+- Changing, disabling or deleting an alarm in that window needs the emergency code. Unlocked otherwise.
 
 **History**
-- Last 30 days, mornings-in-a-row streak, and CSV export.
+- Last 30 days, streak, CSV export.
+- Weekly report (History tab + Sunday notification): time to get up, still-up catches, slowest step, hushes, emergency stops, routine on-time rate, vs. the previous week.
+- Tamper log (Settings): blocked screens, wrong codes, protection changes, hushes, step swaps, force-stops, uninstall-lock attempts.
 
-**Weekly report** (History tab, plus a notification Sunday evening)
-- How fast you got up, how often the still-up check caught you, your slowest step, hushes and emergency stops, routine on-time rate, all compared with the week before.
+All data stays on the phone. No account, no backups, no uploads. (Internet permission comes from Google's barcode scanner library.)
 
-**Tamper log** (Settings)
-- Every blocked settings screen, wrong code, protection change, hush, step swap, force-stop and uninstall-lock attempt, with the time.
-- Everything stays on the phone, with no account and no backups. Upright never uploads your data. (The APK lists internet access because Google's barcode scanner library adds it.)
+## Setup
 
-## Setup on the phone
+1. Install the APK from [Releases](https://github.com/PresWiFi/upright/releases/latest).
+2. Open Settings in the app and work through the checklist. On OnePlus, also set app info → Battery → **Unrestricted** and allow auto-launch.
+3. Add tags (Settings → Tags), named by location.
+4. Add an alarm with steps. **Test now** to try it.
+5. Create the emergency code, store it away from bed, and turn **Protection on**.
 
-1. Download the APK from [Releases](https://github.com/PresWiFi/upright/releases/latest) on the phone and install it (allow installs from your browser when asked).
-2. Open Settings in the app and work through the checklist. Each "Fix" button opens the right system page.
-   - On OnePlus also go to app info → Battery → **Unrestricted**, and allow auto-launch if it's offered.
-3. Add tags (Settings → Tags): tap each NFC card, or scan a barcode. Name them by where they'll live.
-4. Add an alarm with steps. Use **Test now** to try it.
-5. Make the emergency code, write it down, put it somewhere you have to get up to reach. Turn **Protection on**.
+## Watch app
 
-## Install the watch app
+Installed once over ADB Wi-Fi:
 
-Watch apps can't be sideloaded from the phone, so this uses ADB over Wi-Fi from a computer (once).
+1. Install [platform-tools](https://developer.android.com/tools/releases/platform-tools).
+2. Watch: Settings → About watch → Software → tap **Software version** 5 times.
+3. Developer options → enable **ADB debugging** and **Wireless debugging** (same Wi-Fi as the computer).
+4. Wireless debugging → **Pair new device**, then `adb pair <ip>:<pair-port>` and enter the code.
+5. `adb connect <ip>:<port>` and `adb install Upright-watch-0.2.0.apk`.
+6. Open Upright on the watch and allow notifications. Phone Settings → Galaxy Watch should say **Connected**.
+7. Turn Wireless debugging off.
 
-1. Install [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) on your computer.
-2. On the watch: Settings → About watch → Software → tap **Software version** 5 times to turn on Developer options.
-3. Settings → Developer options → turn on **ADB debugging** and **Wireless debugging**. Put the watch and computer on the same Wi-Fi.
-4. In Wireless debugging, tap **Pair new device**. On the computer: `adb pair <ip>:<pair-port>` and type the code.
-5. Then `adb connect <ip>:<port>` (the port shown on the Wireless debugging screen) and `adb install Upright-watch-0.2.0.apk`.
-6. Open Upright on the watch once and allow notifications. Settings → Galaxy Watch on the phone should say **Connected**.
-7. Turn Wireless debugging back off.
-
-The watch and phone apps must come from the same build (same signing key), or they can't talk to each other.
+Watch and phone apps must share a signing key.
 
 ## Build
 
-Needs JDK 17 and the Android SDK (compileSdk 37).
+JDK 17 and Android SDK (compileSdk 37).
 
 ```
-./gradlew testDebugUnitTest     # unit tests for the alarm and session logic (Logic.kt)
+./gradlew testDebugUnitTest     # Logic.kt unit tests
 ./gradlew assembleRelease       # app/build/outputs/apk/release/app-release.apk and wear/build/outputs/apk/release/wear-release.apk
 ```
 
-Release builds are signed with the key named in `~/.gradle/gradle.properties`:
+Release signing via `~/.gradle/gradle.properties`:
 
 ```
 upright.keystore=/path/to/upright-release.jks
 upright.keystorePassword=...
 ```
 
-Without those lines they fall back to the debug key. Updates only install over a build signed with the same key, so keep a backup of the keystore and its password. Releases from 0.3.0 on use a new key; 0.1.0 and 0.2.0 have to be uninstalled before installing 0.3.0.
-If you build from WSL, copy the project onto the Linux filesystem first; Gradle on `/mnt/c` breaks on file modes.
+Without it, builds use the debug key. Updates need the same key, so back up the keystore. 0.3.0+ uses a new key; uninstall 0.1.0/0.2.0 first.
+On WSL, build from the Linux filesystem; Gradle on `/mnt/c` breaks on file modes.
 
 ## Code map
 
-- `Model.kt`: data (alarms, steps, tags, wake-up session, settings).
-- `Logic.kt`: all the rules, pure and unit-tested (next alarm time, session steps, still-up, routine, streaks, weekly report, CSV).
-- `Store.kt`: one JSON file in device-protected storage, so the alarm works before first unlock after a reboot.
-- `Scheduler.kt`, `Receivers.kt`: Android alarms, boot handling, reminder buttons.
-- `RingService.kt`: sound, vibration, volume. `RingActivity.kt`: the ringing screen and steps.
-- `GuardService.kt`: the settings guard. `ui/`: the app screens.
-- `WatchLink.kt`: sends alarm state to the watch.
-- `wear/`: the watch app (sync with the phone, backup alarm, buzzing).
+- `Model.kt`: data
+- `Logic.kt`: all rules, pure and unit-tested
+- `Store.kt`: JSON in device-protected storage (works before first unlock)
+- `Scheduler.kt`, `Receivers.kt`: alarms, boot, notification buttons
+- `RingService.kt`: sound, vibration, volume; `RingActivity.kt`: ringing screen
+- `GuardService.kt`: settings guard; `ui/`: screens
+- `WatchLink.kt`: phone → watch sync; `wear/`: watch app
